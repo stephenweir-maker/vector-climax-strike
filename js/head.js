@@ -4,20 +4,27 @@
 //           plane sits at the jet, so the screen reads as a window with depth behind it.
 //   LOOK    TrackIR-style: turning / nodding your head swings the view (amplified, deadzone, clamped). The jet and its aim are untouched.
 //   STEER   tilt (and lean) your head to bank the jet, nod to climb / dive; a stick, pad or key always overrides it.
-// Tracking: MediaPipe legacy solutions from jsDelivr, loaded only when a mode is switched on: face_mesh (468 landmarks, 3D head pose),
-// falling back to face_detection (box + 6 key points). Inference runs ~25 Hz on its own timer, off the render loop; results go through
-// a One Euro filter and are eased per frame. ?headsim=1 replaces the camera with a simulated head (sine motion; keys 1/3 turn, 2/5 nod, 4/6 tilt, 7/9 lean;
-// HEAD.simSet) for tests. The camera only runs while it is needed (a mode on + playing, or the HEAD TRACKING panel open) and stops when
-// the game pauses or the tab hides. Inside the Claude artifact the camera is blocked, so the panel says it needs the app link.
+// Tracking: MediaPipe legacy solutions, loaded only when needed - from the game's own folder first (vendor/mediapipe/<pkg>/), jsDelivr as the
+// fallback: face_mesh (468 landmarks, 3D head pose) or the LITE face_detection (box + 6 key points). Only ONE tracker instance ever exists.
+// Inference runs ~25 Hz on its own timer (backs off on slow phones), with a stall watchdog; results are sanity-checked (finite), One Euro
+// filtered and eased per frame. Fail-soft: every head-derived camera value is checked and the normal camera is used if anything is off;
+// if the game's WebGL context is lost the tracker stops (three.js restores the context) and AUTO switches to the LITE tracker.
+// The camera picture is a real, visible <video> inside the preview (phones may not decode a hidden video).
+// ?headsim=1 replaces the camera with a simulated head (sine; keys 1/3 turn, 2/5 nod, 4/6 tilt, 7/9 lean; HEAD.simSet) for tests.
+// The camera runs only while needed (a mode on + playing, the HEAD TRACKING panel, or TEST TRACKING) and stops on pause / hidden tab.
+// Inside the Claude artifact the camera is blocked, so the panel says it needs the app link.
 'use strict';
 (function(){
   const Q=new URLSearchParams(location.search);
   const HEAD=window.HEAD={};
   const SKEY='vcx_head';
-  const DEF={win:false, winS:5, look:false, lookS:5, steer:false, steerS:5, prev:true};
+  const DEF={win:false, winS:5, look:false, lookS:5, steer:false, steerS:5, prev:true, trk:0};
   const S=HEAD.S=Object.assign({},DEF,(()=>{ try{ return JSON.parse(localStorage.getItem(SKEY)||'{}')||{}; }catch(e){ return {}; } })());
+  for(const k of ['winS','lookS','steerS']) if(!(S[k]>=1&&S[k]<=10)) S[k]=5; if(!(S.trk>=0&&S.trk<=2)) S.trk=0;
   HEAD.save=function(){ try{ localStorage.setItem(SKEY,JSON.stringify(S)); }catch(e){} };
   HEAD.anyOn=()=>!!(S.win||S.look||S.steer);
+  const fin=v=>typeof v==='number'&&isFinite(v);
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
   /* ---------------- where can the camera run? ---------------- */
   const SIM=Q.get('headsim')==='1';
   function availability(){
@@ -31,9 +38,12 @@
   }
   HEAD.avail=availability();
   HEAD.usable=()=>HEAD.avail!=='noapp';
+  /* ---------------- diagnostics (shown in the panel, the preview and TEST TRACKING) ---------------- */
+  const D=HEAD.D={cam:'OFF', camW:0, camH:0, vfps:0, trk:'', trkState:'', from:'', face:false, hz:0, ms:0, err:'', bad:0, sends:0, fails:0, glLost:0, noFrames:0};
+  function note(msg){ D.err=String(msg||'').slice(0,90); console.warn('[head] '+D.err); }
   /* ---------------- One Euro filter ---------------- */
   function OneEuro(minCut,beta,dCut){ let xp=null, dxp=0, tp=0; const a=(cut,dt)=>{ const r=2*Math.PI*cut*dt; return r/(r+1); };
-    return { f(x,t){ if(xp==null){ xp=x; tp=t; return x; } const dt=Math.max(1e-3,t-tp); tp=t; const dx=(x-xp)/dt; dxp+=a(dCut,dt)*(dx-dxp); const cut=minCut+beta*Math.abs(dxp); xp+=a(cut,dt)*(x-xp); return xp; }, reset(){ xp=null; dxp=0; } }; }
+    return { f(x,t){ if(xp==null||!fin(xp)){ xp=x; tp=t; dxp=0; return x; } const dt=Math.max(1e-3,t-tp); tp=t; const dx=(x-xp)/dt; dxp+=a(dCut,dt)*(dx-dxp); if(!fin(dxp)) dxp=0; const cut=minCut+beta*Math.abs(dxp); xp+=a(cut,dt)*(x-xp); return xp; }, reset(){ xp=null; dxp=0; } }; }
   const CH=['x','y','z','yaw','pitch','roll'];
   const FILT={x:OneEuro(1.2,0.6,1), y:OneEuro(1.2,0.6,1), z:OneEuro(0.8,0.4,1), yaw:OneEuro(1.0,0.5,1), pitch:OneEuro(1.0,0.5,1), roll:OneEuro(1.0,0.5,1)};
   /* ---------------- pose state ----------------
@@ -43,93 +53,163 @@
      out   = what the game uses: eased toward tgt every frame, toward neutral when the face is lost */
   const zero=()=>({x:0,y:0,z:0,yaw:0,pitch:0,roll:0});
   let cal=null, tgt=zero(); const out=HEAD.pose=zero();
-  let face=false, lastFaceT=-9, faceBox=null, calib=null, startT=0;
+  let face=false, lastFaceT=-9, faceBox=null, facePts=null, calib=null, startT=0;
   const st={run:false, phase:'off', src:'', msg:'', err:''};
   HEAD.state=st;
   function now(){ return performance.now()/1000; }
-  function feed(raw,box){ const t=now(); faceBox=box||null; face=true; lastFaceT=t;
-    if(calib){ calib.n++; for(const k of CH) calib.s[k]+=raw[k]; if(t>calib.until&&calib.n>=3){ cal={}; for(const k of CH) cal[k]=calib.s[k]/calib.n; calib=null; for(const k of CH) FILT[k].reset(); st.msg='CENTRED'; st.msgT=t+1.2; } return; }
+  function resetPose(){ tgt=zero(); for(const k of CH){ out[k]=0; FILT[k].reset(); } }
+  function feed(raw,box,pts){ const t=now();
+    for(const k of CH) if(!fin(raw[k])){ D.bad++; noFace(); return; }            // a broken result never reaches the game
+    faceBox=box||null; facePts=pts||null; face=true; lastFaceT=t; D.face=true;
+    if(calib){ calib.n++; for(const k of CH) calib.s[k]+=raw[k]; if(t>calib.until&&calib.n>=3){ const c={}; for(const k of CH) c[k]=calib.s[k]/calib.n; if(CH.every(k=>fin(c[k]))&&c.z>0) cal=c; calib=null; for(const k of CH) FILT[k].reset(); st.msg='CENTRED'; st.msgT=t+1.2; } return; }
     if(!cal){ HEAD.calibrate(0.6); return; }
     // calibrated, screen-oriented: the image is not mirrored, so moving / turning to your right is -x in the image
-    const v={ x:-(raw.x-cal.x)/0.22, y:-(raw.y-cal.y)/0.22, z:(raw.z/cal.z)-1, yaw:raw.yaw-cal.yaw, pitch:raw.pitch-cal.pitch, roll:raw.roll-cal.roll };
-    v.z=v.z/0.3;
-    for(const k of CH){ const lim=k==='x'||k==='y'||k==='z'?1.6:1.2; tgt[k]=Math.max(-lim,Math.min(lim,FILT[k].f(v[k],t))); } }
-  function noFace(){ face=false; faceBox=null; }
+    const v={ x:-(raw.x-cal.x)/0.22, y:-(raw.y-cal.y)/0.22, z:((raw.z/cal.z)-1)/0.3, yaw:raw.yaw-cal.yaw, pitch:raw.pitch-cal.pitch, roll:raw.roll-cal.roll };
+    for(const k of CH){ const lim=k==='x'||k==='y'||k==='z'?1.6:1.2; const f=FILT[k].f(clamp(fin(v[k])?v[k]:0,-4,4),t); if(!fin(f)){ D.bad++; resetPose(); return; } tgt[k]=clamp(f,-lim,lim); } }
+  function noFace(){ face=false; faceBox=null; facePts=null; D.face=false; }
   HEAD.calibrate=function(sec){ calib={until:now()+(sec||0.5), n:0, s:zero()}; st.msg='HOLD STILL - CENTRING'; st.msgT=now()+(sec||0.5)+0.3; };
   /* ---------------- per frame: ease the output ---------------- */
-  HEAD.update=function(dt){ const t=now(); if(SIM&&st.run) simTick(t);
-    const lost=!st.run||!face||t-lastFaceT>0.35; HEAD.lost=st.run&&lost&&t-startT>1.2;
+  HEAD.update=function(dt){ const t=now(); if(!fin(dt)||dt<0) dt=0; dt=Math.min(dt,0.25); if(SIM&&st.run) simTick(t);
+    const lost=!st.run||!face||t-lastFaceT>0.35; HEAD.lost=st.run&&lost&&t-startT>1.2; if(t-lastFaceT>0.35) D.face=false;
     const k=1-Math.exp(-dt*(lost?2.6:14));
-    for(const c of CH) out[c]+=((lost?0:tgt[c])-out[c])*k;
+    for(const c of CH){ out[c]+=((lost?0:tgt[c])-out[c])*k; if(!fin(out[c])){ D.bad++; resetPose(); break; } }
     if(lost) for(const c of CH) tgt[c]*=Math.exp(-dt*2.6);
     HEAD.tracking=st.run&&!lost&&!!cal;
-    ui(t); };
+    watchVideo(t); ui(t); };
   /* ---------------- what the game asks for ---------------- */
-  let wantOn=false, wantMenu=false;
-  HEAD.want=function(play,menu){ wantOn=!!play; wantMenu=!!menu; const need=HEAD.usable()&&HEAD.anyOn()&&(wantOn||wantMenu)&&!document.hidden;
-    if(need&&!st.run&&st.phase!=='starting'&&!st.failed) start(); else if(!need&&st.run) stop(); };
-  document.addEventListener('visibilitychange',()=>{ if(document.hidden&&st.run) stop(); });
-  addEventListener('pagehide',()=>{ if(st.run) stop(); });
+  let wantPlay=false, wantMenu=false, wantTest=false;
+  HEAD.want=function(play,menu,test){ wantPlay=!!play; wantMenu=!!menu; wantTest=!!test;
+    const need=HEAD.usable()&&!document.hidden&&!HEAD.glDown&&((HEAD.anyOn()&&(wantPlay||wantMenu))||wantTest);
+    if(need&&!st.run&&st.phase!=='starting'&&!st.failed) start(); else if(!need&&(st.run||st.phase==='starting')) stop(); };
+  document.addEventListener('visibilitychange',()=>{ if(document.hidden&&(st.run||st.phase==='starting')) stop(); });
+  addEventListener('pagehide',()=>{ stop(); });
   HEAD.retry=function(){ st.failed=false; st.err=''; };
-  /* ---------------- camera + MediaPipe ---------------- */
-  const MP={ mesh:{pkg:'face_mesh', ver:'0.4.1633559619', file:'face_mesh.js', cls:'FaceMesh'},
-             det:{pkg:'face_detection', ver:'0.4.1646425229', file:'face_detection.js', cls:'FaceDetection'} };
-  const base=m=>'https://cdn.jsdelivr.net/npm/@mediapipe/'+m.pkg+'@'+m.ver+'/';
+  /* ---------------- the game's WebGL context: if it is lost, stop tracking at once (keeps the game alive) ---------------- */
+  let liteForced=false; HEAD.glDown=false;
+  document.addEventListener('webglcontextlost',ev=>{ if(!(ev.target instanceof HTMLCanvasElement)) return; D.glLost++; HEAD.glDown=true; // three.js calls preventDefault -> it restores
+    note('graphics reset (WebGL context lost) - head tracking paused');
+    if(st.run||st.phase==='starting') stop();
+    if(solverKind==='mesh'&&S.trk===0) liteForced=true;                 // AUTO: the full mesh may be too heavy for this phone - use LITE next time
+    closeSolver();
+    if(D.glLost>=2){ st.failed=true; st.err='graphics reset twice - head tracking off'; } },true);
+  document.addEventListener('webglcontextrestored',ev=>{ if(!(ev.target instanceof HTMLCanvasElement)) return; HEAD.glDown=false; },true);
+  /* ---------------- the tracker's own WebGL context: watched too (a lost tracker context = no faces forever) ---------------- */
+  let capture=0, trkCanvases=[];
+  (function hookGL(){ const wrap=proto=>{ if(!proto||proto.__vcxHead) return; const oc=proto.getContext; proto.__vcxHead=1;
+      proto.getContext=function(t){ const c=oc.apply(this,arguments); if(capture>0&&c&&/webgl/i.test(String(t))&&!trkCanvases.includes(this)){ trkCanvases.push(this); try{ this.addEventListener('webglcontextlost',onTrackerGLLost); }catch(e){} } return c; }; };
+    try{ wrap(window.HTMLCanvasElement&&HTMLCanvasElement.prototype); wrap(window.OffscreenCanvas&&OffscreenCanvas.prototype); }catch(e){} })();
+  function onTrackerGLLost(){ D.trkGL=(D.trkGL||0)+1; note('tracker graphics reset - restarting the tracker');
+    const wasMesh=solverKind==='mesh'; if(st.run||st.phase==='starting') stop(); closeSolver(); trkCanvases=[];
+    if(wasMesh&&S.trk===0) liteForced=true; if(D.trkGL>=3){ st.failed=true; st.err='the tracker keeps losing its graphics - head tracking off'; } }
+  /* ---------------- MediaPipe (vendor first, jsDelivr fallback), one instance only ---------------- */
+  const MP={ mesh:{pkg:'face_mesh', ver:'0.4.1633559619', file:'face_mesh.js', cls:'FaceMesh', name:'FACE MESH'},
+             det:{pkg:'face_detection', ver:'0.4.1646425229', file:'face_detection.js', cls:'FaceDetection', name:'LITE (FACE BOX)'} };
+  const BASES={ app:m=>'vendor/mediapipe/'+m.pkg+'/', cdn:m=>'https://cdn.jsdelivr.net/npm/@mediapipe/'+m.pkg+'@'+m.ver+'/' };
   const loaded={};
-  function loadScript(url){ if(loaded[url]) return loaded[url]; return loaded[url]=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=url; s.crossOrigin='anonymous'; s.async=true;
-    s.onload=()=>res(); s.onerror=()=>{ delete loaded[url]; rej(new Error('could not load '+url.split('/').pop())); }; document.head.appendChild(s); }); }
-  const timeout=(p,ms,what)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(what+' timed out')),ms))]);
-  let video=null, stream=null, solver=null, solverKind='', pumpT=0, gen=0;
+  function loadScript(url){ if(loaded[url]) return loaded[url]; return loaded[url]=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=url; if(/^https?:/.test(url)) s.crossOrigin='anonymous'; s.async=true;
+    s.onload=()=>res(); s.onerror=()=>{ delete loaded[url]; s.remove(); rej(new Error('could not load '+url.replace(/^.*\/(@mediapipe\/)?/,''))); }; document.head.appendChild(s); }); }
+  const timeout=(p,ms,what)=>{ let tm; return Promise.race([p,new Promise((_,rej)=>{ tm=setTimeout(()=>rej(new Error(what+' timed out')),ms); })]).finally(()=>clearTimeout(tm)); };
+  let video=null, stream=null, solver=null, solverKind='', solverP=null, pumpT=0, gen=0, lastPump=0;
   const vw=()=>video&&video.videoWidth||640, vh=()=>video&&video.videoHeight||480;
   // face_mesh: 3D landmarks -> head position, distance and rotation
   function onMesh(res){ const L=res&&res.multiFaceLandmarks&&res.multiFaceLandmarks[0]; if(!L||L.length<300){ noFace(); return; }
-    const W=vw(), H=vh(), P=i=>({x:L[i].x*W, y:L[i].y*H, z:(L[i].z||0)*W});
-    const R=P(33), Lf=P(263), top=P(10), chin=P(152), nose=P(1);
+    const W=vw(), H=vh(); const P=i=>{ const p=L[i]||{}; return {x:(p.x||0)*W, y:(p.y||0)*H, z:(p.z||0)*W}; };
+    const R=P(33), Lf=P(263), top=P(10), chin=P(152);
     const r={x:Lf.x-R.x, y:Lf.y-R.y, z:Lf.z-R.z}, u={x:chin.x-top.x, y:chin.y-top.y, z:chin.z-top.z};
-    const n={x:r.y*u.z-r.z*u.y, y:r.z*u.x-r.x*u.z, z:r.x*u.y-r.y*u.x}; const nl=Math.hypot(n.x,n.y,n.z)||1; const f={x:-n.x/nl, y:-n.y/nl, z:-n.z/nl}; // toward the camera
+    const n={x:r.y*u.z-r.z*u.y, y:r.z*u.x-r.x*u.z, z:r.x*u.y-r.y*u.x}; const nl=Math.hypot(n.x,n.y,n.z); if(!(nl>1e-6)){ D.bad++; noFace(); return; }
+    const f={x:-n.x/nl, y:-n.y/nl, z:-n.z/nl}; // toward the camera
     const eye=Math.hypot(r.x,r.y)/W;
     const raw={ x:(R.x+Lf.x)/2/W, y:(R.y+Lf.y)/2/H, z:1/Math.max(0.02,eye), yaw:Math.atan2(-f.x,-f.z), pitch:Math.atan2(-f.y,-f.z), roll:-Math.atan2(r.y,r.x) };
-    let x0=1,y0=1,x1=0,y1=0; for(const i of [10,152,234,454,33,263,1]){ x0=Math.min(x0,L[i].x); x1=Math.max(x1,L[i].x); y0=Math.min(y0,L[i].y); y1=Math.max(y1,L[i].y); }
-    feed(raw,{x:x0,y:y0,w:x1-x0,h:y1-y0}); void nose; }
-  // face_detection: box + 6 key points (right eye, left eye, nose tip, mouth, right ear, left ear) -> a rougher pose
+    let x0=1,y0=1,x1=0,y1=0; for(const i of [10,152,234,454,33,263,1]){ const p=L[i]; if(!p) continue; x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); }
+    const pts=[]; for(let i=0;i<L.length;i+=5) pts.push(L[i].x,L[i].y);
+    feed(raw,{x:x0,y:y0,w:x1-x0,h:y1-y0},pts); }
+  // face_detection (LITE): box + 6 key points (right eye, left eye, nose tip, mouth, right ear, left ear) -> a rougher pose
   function onDet(res){ const d=res&&res.detections&&res.detections[0]; if(!d){ noFace(); return; }
     const b=d.boundingBox||{}, K=d.landmarks||[]; if(K.length<4){ noFace(); return; }
     const W=vw(), H=vh(), re=K[0], le=K[1], no=K[2], mo=K[3];
-    const ex=(le.x-re.x)*W, ey=(le.y-re.y)*H, ed=Math.hypot(ex,ey)||1, mx=(re.x+le.x)/2, my=(re.y+le.y)/2;
+    const ex=(le.x-re.x)*W, ey=(le.y-re.y)*H, ed=Math.hypot(ex,ey); if(!(ed>1)){ D.bad++; noFace(); return; }
+    const mx=(re.x+le.x)/2, my=(re.y+le.y)/2;
     const yawR=((no.x-mx)*W)/ed, pitR=((no.y-my)*H)/Math.max(1,(mo.y-my)*H);
-    const raw={ x:mx, y:my, z:1/Math.max(0.02,(b.width||ed/W*2.2)), yaw:-Math.asin(Math.max(-1,Math.min(1,yawR*1.1))), pitch:-(pitR-0.5)*1.6, roll:-Math.atan2(ey,ex) };
-    feed(raw,{x:(b.xCenter||mx)-(b.width||0.3)/2, y:(b.yCenter||my)-(b.height||0.4)/2, w:b.width||0.3, h:b.height||0.4}); }
-  async function makeSolver(kind){ const m=MP[kind], bs=base(m); await timeout(loadScript(bs+m.file),20000,m.pkg);
-    const C=window[m.cls]; if(!C) throw new Error(m.cls+' missing');
+    const bw=fin(b.width)&&b.width>0.01?b.width:ed/W*2.2;
+    const raw={ x:mx, y:my, z:1/Math.max(0.02,bw), yaw:-Math.asin(clamp(yawR*1.1,-1,1)), pitch:-(pitR-0.5)*1.6, roll:-Math.atan2(ey,ex) };
+    const pts=[]; for(const p of K) pts.push(p.x,p.y);
+    feed(raw,{x:(fin(b.xCenter)?b.xCenter:mx)-bw/2, y:(fin(b.yCenter)?b.yCenter:my)-(b.height||bw*1.3)/2, w:bw, h:b.height||bw*1.3},pts); }
+  async function makeSolver(kind,from){ const m=MP[kind], bs=BASES[from](m); capture++; try{ return await makeSolver2(kind,from,m,bs); } finally { capture--; } }
+  async function makeSolver2(kind,from,m,bs){
+    D.trk=m.name; D.trkState='loading'; D.from=from;
+    if(!window[m.cls]) await timeout(loadScript(bs+m.file),from==='app'?15000:20000,m.pkg+'.js');
+    const C=window[m.cls]; if(typeof C!=='function') throw new Error(m.cls+' missing');
     const s=new C({locateFile:f=>bs+f});
-    if(kind==='mesh') s.setOptions({maxNumFaces:1, refineLandmarks:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
-    else s.setOptions({model:'short', minDetectionConfidence:0.5});
-    s.onResults(kind==='mesh'?onMesh:onDet);
-    if(typeof s.initialize==='function') await timeout(s.initialize(),30000,m.pkg+' start');
-    return s; }
-  async function openCamera(){ const v=document.createElement('video'); v.setAttribute('playsinline',''); v.muted=true; v.autoplay=true; v.style.cssText='position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0';
-    document.body.appendChild(v);
-    const sm=await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:'user', width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:30}}});
-    v.srcObject=sm; try{ await v.play(); }catch(e){}
-    return {v,sm}; }
-  async function start(){ const my=++gen; st.phase='starting'; st.err=''; st.failed=false; startT=now(); face=false; cal=null; tgt=zero();
-    if(SIM){ st.run=true; st.phase='tracking'; st.src='SIMULATED HEAD'; return; }
-    st.src=''; let camP=null;
     try{
-      const cam=camP=openCamera(); cam.catch(()=>{});
-      if(!solver){ try{ solver=await makeSolver('mesh'); solverKind='mesh'; }catch(e1){ console.warn('[head] face_mesh failed: '+e1.message); try{ solver=await makeSolver('det'); solverKind='det'; }catch(e2){ throw new Error('tracker did not load ('+e2.message+')'); } } }
-      const c=await cam; if(my!==gen){ c.sm.getTracks().forEach(t=>t.stop()); c.v.remove(); return; }
-      video=c.v; stream=c.sm; st.run=true; st.phase='tracking'; st.src=solverKind==='mesh'?'FACE MESH':'FACE DETECTION'; startT=now(); pump(my);
-    }catch(e){ camP&&camP.then(c=>{ try{ c.sm.getTracks().forEach(t=>t.stop()); c.v.remove(); }catch(_){} }).catch(()=>{}); if(my!==gen) return; st.phase='off'; st.run=false; st.failed=true;
+      if(kind==='mesh') s.setOptions({maxNumFaces:1, refineLandmarks:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
+      else s.setOptions({model:'short', minDetectionConfidence:0.5});
+      s.onResults(r=>{ try{ (kind==='mesh'?onMesh:onDet)(r); }catch(e){ D.bad++; note('result: '+e.message); } });
+      if(typeof s.initialize==='function') await timeout(s.initialize(),40000,m.pkg+' start');
+    }catch(e){ try{ s.close&&s.close(); }catch(_){} throw e; }
+    return s; }
+  function wantKind(){ return S.trk===1?'mesh':S.trk===2?'det':(liteForced?'det':'mesh'); }
+  function closeSolver(){ const s=solver; solver=null; solverKind=''; if(s) try{ const p=s.close&&s.close(); p&&p.catch&&p.catch(()=>{}); }catch(e){} }
+  function getSolver(){ const k=wantKind();
+    if(solver&&solverKind===k) return Promise.resolve(solver);
+    if(solverP) return solverP;                     // a tracker is already on its way - never make a second one
+    closeSolver();
+    const order=k==='mesh'?[['mesh','app'],['mesh','cdn'],['det','app'],['det','cdn']]:[['det','app'],['det','cdn']];
+    solverP=(async()=>{ let last=null;
+      for(const [kind,from] of order){ try{ const s=await makeSolver(kind,from); solver=s; solverKind=kind; D.sends=0; D.trkState='ready'; D.from=from; if(kind!==k) note(MP[k].name+' failed - using '+MP[kind].name); return s; }
+        catch(e){ last=e; note(MP[kind].pkg+' ('+from+'): '+e.message); } }
+      D.trkState='error'; throw new Error('tracker did not load'+(last?' ('+last.message+')':'')); })();
+    solverP.then(()=>{ solverP=null; },()=>{ solverP=null; });
+    return solverP; }
+  /* ---------------- the camera ---------------- */
+  async function openCamera(){ build();
+    const sm=await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:'user', width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:30}}});
+    return sm; }
+  function attachVideo(sm){ const v=vid; v.srcObject=sm; v.muted=true; const p=v.play(); if(p&&p.catch) p.catch(e=>note('video play: '+e.message)); video=v;
+    D.vfps=null; vFrames=0; vT0=now(); if(v.requestVideoFrameCallback){ const cb=()=>{ if(video!==v) return; vFrames++; v.requestVideoFrameCallback(cb); }; v.requestVideoFrameCallback(cb); } }
+  let vFrames=0, vT0=0, lastVT=-1, lastVTChange=0;
+  function watchVideo(t){ if(!video||!st.run) return; const v=video; D.camW=v.videoWidth; D.camH=v.videoHeight;
+    if(v.requestVideoFrameCallback){ if(t-vT0>=1){ D.vfps=Math.round(vFrames/(t-vT0)); vFrames=0; vT0=t; } }
+    else if(v.currentTime!==lastVT){ lastVT=v.currentTime; lastVTChange=t; D.vfps=-1; }
+    // a camera that gives no picture (some phones pause a video they think is hidden): poke it, then report
+    const stale=v.requestVideoFrameCallback?(D.vfps===0&&t-startT>2.5):(t-lastVTChange>2.5);
+    if(stale&&t-(watchVideo.poke||0)>2){ watchVideo.poke=t; D.noFrames++; try{ v.play(); }catch(e){} if(D.noFrames>=3) note('the camera gives no picture'); } }
+  async function start(){ const my=++gen; st.phase='starting'; st.err=''; st.failed=false; startT=now(); noFace(); cal=null; resetPose(); D.fails=0; D.noFrames=0;
+    if(SIM){ st.run=true; st.phase='tracking'; st.src='SIMULATED HEAD'; D.cam='SIM'; D.trk='SIMULATED'; D.trkState='ready'; build(); return; }
+    st.src=''; D.cam='STARTING';
+    let sm=null;
+    try{
+      const camP=openCamera(); camP.catch(()=>{});
+      const solP=getSolver(); solP.catch(()=>{});
+      sm=await camP;
+      if(my!==gen){ sm.getTracks().forEach(t=>t.stop()); return; }
+      attachVideo(sm); stream=sm; D.cam='ON';
+      await solP;
+      if(my!==gen) return;                               // stop() already released the camera
+      st.run=true; st.phase='tracking'; st.src=MP[solverKind].name; startT=now(); lastPump=0; pump(my);
+    }catch(e){ if(my!==gen){ return; }
+      if(sm&&stream!==sm) try{ sm.getTracks().forEach(t=>t.stop()); }catch(_){}
+      releaseCamera(); st.phase='off'; st.run=false; st.failed=true;
       let framed=false; try{ framed=window.top!==window.self; }catch(_){ framed=true; }
-      if(framed&&e&&(e.name==='NotAllowedError'||e.name==='SecurityError')){ HEAD.avail='noapp'; st.err=''; return; } // blocked by the host page (artifact)
-      st.err=e&&e.name==='NotAllowedError'?'camera permission was refused':e&&e.name==='NotFoundError'?'no front camera found':String(e&&e.message||e).slice(0,80); console.warn('[head] '+st.err); } }
+      if(framed&&e&&(e.name==='NotAllowedError'||e.name==='SecurityError')){ HEAD.avail='noapp'; st.err=''; D.cam='BLOCKED'; return; } // blocked by the host page (artifact)
+      st.err=e&&e.name==='NotAllowedError'?'camera permission was refused':e&&e.name==='NotFoundError'?'no front camera found':e&&e.name==='NotReadableError'?'the camera is busy (another app?)':String(e&&e.message||e).slice(0,80);
+      D.cam=/camera/.test(st.err)?'ERROR':D.cam==='STARTING'?'OFF':D.cam; note(st.err); } }
   async function pump(my){ if(my!==gen||!st.run||SIM) return; const t0=performance.now();
-    if(video&&video.readyState>=2&&video.videoWidth&&solver){ try{ await solver.send({image:video}); }catch(e){ console.warn('[head] send: '+(e&&e.message)); } }
-    // ~25 Hz, but a slow phone backs off so tracking never takes more than ~40% of the main thread from the game
-    const el=performance.now()-t0; HEAD.inferMs=el; pumpT=setTimeout(()=>pump(my),Math.max(4,Math.max(40,el*2.5)-el)); }
-  function stop(){ gen++; clearTimeout(pumpT); st.run=false; st.phase='off'; face=false; faceBox=null;
-    if(stream){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){} stream=null; } if(video){ video.remove(); video=null; } }
+    if(video&&video.readyState>=2&&video.videoWidth&&solver){
+      const cap=D.sends<3; if(cap) capture++;
+      try{ await timeout(solver.send({image:video}),4000,'tracker'); D.fails=0; D.sends++; }
+      catch(e){ D.fails++; note('tracker: '+(e&&e.message)); if(cap) capture--; if(D.fails>=3){ stall(my); return; } }
+      if(cap&&capture>0&&!D.fails) capture--;
+      if(my!==gen) return;
+      const t1=performance.now(), el=t1-t0; HEAD.inferMs=el; D.ms=D.ms?D.ms*0.8+el*0.2:el;
+      if(lastPump){ const hz=1000/Math.max(1,t0-lastPump); D.hz=D.hz?D.hz*0.8+hz*0.2:hz; } lastPump=t0;
+      // ~25 Hz, but a slow phone backs off so tracking never takes more than ~40% of the main thread from the game
+      pumpT=setTimeout(()=>pump(my),Math.max(4,Math.max(40,el*2.5)-el)); }
+    else pumpT=setTimeout(()=>pump(my),60); }
+  function stall(my){ if(my!==gen) return; const wasMesh=solverKind==='mesh'; closeSolver(); stop();
+    if(wasMesh&&S.trk===0){ liteForced=true; note('the full tracker stalled - switched to LITE'); }   // want() starts again with LITE
+    else { st.failed=true; st.err='the tracker stopped responding'; } }
+  function releaseCamera(){ if(stream){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){} stream=null; } if(vid){ try{ vid.pause(); }catch(e){} vid.srcObject=null; } video=null; }
+  function stop(){ gen++; clearTimeout(pumpT); st.run=false; st.phase='off'; noFace(); releaseCamera(); if(!SIM) D.cam='OFF'; D.vfps=0; D.hz=0; }
   HEAD.stop=stop;
   /* ---------------- simulated head (?headsim=1) ---------------- */
   const keys={}; if(SIM){ addEventListener('keydown',e=>{ keys[e.code]=true; }); addEventListener('keyup',e=>{ keys[e.code]=false; }); }
@@ -142,82 +222,108 @@
       else p={x:0.8*Math.sin(t*0.7), y:0.35*Math.sin(t*0.5), z:0.3*Math.sin(t*0.3), yaw:0.32*Math.sin(t*0.6), pitch:0.12*Math.sin(t*0.45), roll:0.22*Math.sin(t*0.8)}; }
     // raw image measurement of that pose (inverse of feed's calibration mapping around a centred face)
     const raw={x:0.5-p.x*0.22, y:0.45-p.y*0.22, z:8*(1+p.z*0.3), yaw:p.yaw, pitch:p.pitch, roll:p.roll};
-    if(t-(simTick.last||0)<1/25) return; simTick.last=t;
+    if(t-(simTick.last||0)<1/25) return; simTick.last=t; D.hz=25; D.sends++;
     feed(raw,{x:raw.x-0.12, y:raw.y-0.16, w:0.24, h:0.34}); }
   /* ---------------- shaping helpers ---------------- */
-  const dz=(v,d,c)=>{ const a=Math.abs(v); if(a<=d) return 0; return Math.sign(v)*Math.pow((a-d)/(1-d),c||1); };
-  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
-  // STEER: tilt (+ a little lean) banks, nod climbs / dives. null when not steering (mode off, no face)
+  const dz=(v,d,c)=>{ const a=Math.abs(v); if(!(a>d)) return 0; return Math.sign(v)*Math.pow((a-d)/(1-d),c||1); };
+  // STEER: tilt (+ a little lean) banks, nod climbs / dives. null when not steering (mode off, no face, bad numbers)
   HEAD.steer=function(){ if(!S.steer||!HEAD.tracking) return null; const k=0.5+0.15*S.steerS;
-    const sx=clamp(out.roll/0.34+out.x*0.35,-1.4,1.4), sy=clamp(out.pitch/0.26,-1.4,1.4);
-    return {x:clamp(dz(sx/1.4,0.1,1.35)*1.4*k,-1,1), y:clamp(dz(sy/1.4,0.12,1.35)*1.4*k,-1,1)}; };
-  /* ---------------- camera effects (applied for the render + HUD, then restored) ---------------- */
+    const sx=clamp(out.roll/0.34+out.x*0.6,-1.4,1.4), sy=clamp(out.pitch/0.26+out.y*0.25,-1.4,1.4); // tilt + sideways lean bank, nod (+ a little rise) climbs
+    const r={x:clamp(dz(sx/1.4,0.1,1.35)*1.4*k,-1,1), y:clamp(dz(sy/1.4,0.12,1.35)*1.4*k,-1,1)};
+    return fin(r.x)&&fin(r.y)?r:null; };
+  /* ---------------- camera effects (applied for the render + HUD, then restored) - FAIL SOFT ---------------- */
   let saved=null;
-  const _p={x:0,y:0,z:0};
-  HEAD.active=()=>st.run&&(S.win||S.look)&&HEAD.usable();
-  // cam: THREE.PerspectiveCamera; focusDist: distance to the screen plane (the jet); T: THREE
-  HEAD.applyCam=function(cam,focusDist,T){ T=T||window.THREE; saved=null; if(!HEAD.active()||!cam) return;
+  HEAD.active=()=>st.run&&(S.win||S.look)&&HEAD.usable()&&!HEAD.glDown;
+  const allFin=a=>{ for(let i=0;i<a.length;i++) if(!fin(a[i])) return false; return true; };
+  // cam: THREE.PerspectiveCamera; focusDist: distance to the screen plane (the jet)
+  HEAD.applyCam=function(cam,focusDist,T){ T=T||window.THREE; saved=null; if(!HEAD.active()||!cam||!T) return;
+    for(const c of CH) if(!fin(out[c])){ D.bad++; resetPose(); return; }
     const nothing=Math.abs(out.x)+Math.abs(out.y)+Math.abs(out.z)+Math.abs(out.yaw)+Math.abs(out.pitch)<1e-4; if(nothing) return;
+    if(!(fin(cam.fov)&&cam.fov>1&&cam.fov<170&&fin(cam.aspect)&&cam.aspect>0.05&&fin(cam.near)&&cam.near>0&&fin(cam.far)&&cam.far>cam.near)) return;
     saved={p:cam.position.clone(), q:cam.quaternion.clone(), pm:cam.projectionMatrix.clone(), pmi:cam.projectionMatrixInverse.clone()};
-    const D=Math.max(4,focusDist||20);
-    let ex=0, ey=0, ez=0;
-    const halfH=D*Math.tan(cam.fov*Math.PI/360)/(cam.zoom||1), halfW=halfH*cam.aspect;
-    if(S.win){ const k=0.07+0.11*S.winS; ex=clamp(out.x,-1.5,1.5)*k*halfW; ey=clamp(out.y,-1.5,1.5)*k*halfH*0.9; ez=clamp(out.z,-1,1.5)*0.35*k*D; }
-    else if(S.look){ const k=0.25+0.05*S.lookS; ex=clamp(out.x,-1.2,1.2)*k*halfW*0.35; ey=clamp(out.y,-1.2,1.2)*k*halfH*0.25; } // TrackIR lean
-    if(ex||ey||ez){ const v=new T.Vector3(ex,ey,ez).applyQuaternion(cam.quaternion); cam.position.add(v); }
-    if(S.look){ const g=1+0.25*S.lookS; const yaw=clamp(dz(out.yaw,0.05,1.2)*g,-0.58,0.58), pit=S.steer?0:clamp(dz(out.pitch,0.05,1.2)*g,-0.32,0.32); // clamped so the jet stays on screen
-      if(yaw) cam.rotateY(-yaw); if(pit) cam.rotateX(pit); }
-    cam.updateMatrixWorld(true);
-    if(S.win&&(ex||ey||ez)){ const n=cam.near, f=cam.far, d=Math.max(D*0.35,D+ez);
-      const l=(-halfW-ex)*n/d, r=(halfW-ex)*n/d, t=(halfH-ey)*n/d, b=(-halfH-ey)*n/d;
-      cam.projectionMatrix.makePerspective(l,r,t,b,n,f); cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert(); }
+    try{
+      const Dd=clamp(fin(focusDist)?focusDist:22,4,400);
+      let ex=0, ey=0, ez=0;
+      const halfH=Dd*Math.tan(cam.fov*Math.PI/360)/(cam.zoom||1), halfW=halfH*cam.aspect;
+      if(S.win){ const k=0.035+0.055*S.winS; ex=clamp(out.x,-1.5,1.5)*k*halfW; ey=clamp(out.y,-1.5,1.5)*k*halfH*0.9; ez=clamp(out.z,-1,1.5)*0.35*k*Dd; }
+      else if(S.look){ const k=0.25+0.05*S.lookS; ex=clamp(out.x,-1.2,1.2)*k*halfW*0.35; ey=clamp(out.y,-1.2,1.2)*k*halfH*0.25; } // TrackIR lean
+      if(!(fin(ex)&&fin(ey)&&fin(ez))){ HEAD.restoreCam(cam); return; }
+      if(ex||ey||ez){ const v=new T.Vector3(ex,ey,ez).applyQuaternion(cam.quaternion); cam.position.add(v); }
+      if(S.look){ const g=1+0.25*S.lookS; const yaw=clamp(dz(out.yaw,0.05,1.2)*g,-0.58,0.58), pit=S.steer?0:clamp(dz(out.pitch,0.05,1.2)*g,-0.32,0.32); // clamped so the jet stays on screen
+        if(yaw) cam.rotateY(-yaw); if(pit) cam.rotateX(pit); }
+      cam.updateMatrixWorld(true);
+      if(S.win&&(ex||ey||ez)){ const n=cam.near, f=cam.far, d=Math.max(Dd*0.35,Dd+ez);
+        const l=(-halfW-ex)*n/d, r=(halfW-ex)*n/d, t=(halfH-ey)*n/d, b=(-halfH-ey)*n/d;
+        if([l,r,t,b,d].every(fin)&&r-l>1e-7&&t-b>1e-7){ cam.projectionMatrix.makePerspective(l,r,t,b,n,f); cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert(); } }
+      if(!allFin(cam.projectionMatrix.elements)||!allFin(cam.projectionMatrixInverse.elements)||!allFin(cam.matrixWorld.elements)||!allFin(cam.matrixWorldInverse.elements)){ D.bad++; HEAD.restoreCam(cam); return; }
+    }catch(e){ note('view: '+e.message); HEAD.restoreCam(cam); return; }
     if(HEAD.probe) HEAD.probe(cam); }; // dev: tests sample the head camera here
   HEAD.restoreCam=function(cam){ if(!saved||!cam) return; cam.position.copy(saved.p); cam.quaternion.copy(saved.q); cam.projectionMatrix.copy(saved.pm); cam.projectionMatrixInverse.copy(saved.pmi); cam.updateMatrixWorld(true); saved=null; };
-  /* ---------------- DOM: camera preview (mirrored, face box), face-lost hint, CENTRE button ---------------- */
-  let box=null, cv=null, cx=null, hint=null, lastDraw=0, uiMode='off';
-  HEAD.uiMode=function(m){ uiMode=m; }; // 'play' (small, under the top-right panel), 'menu' (bigger, in the HEAD TRACKING panel), 'off'
-  function build(){ box=document.createElement('div'); box.id='headui';
-    box.innerHTML='<canvas width="160" height="120"></canvas><div class="hc"><div class="hh"></div><button type="button">CENTRE</button></div>';
-    document.body.appendChild(box); cv=box.querySelector('canvas'); cx=cv.getContext('2d'); hint=box.querySelector('.hh');
+  /* ---------------- DOM: the camera picture (a real <video>), face box / landmarks, hint, diagnostics, CENTRE, TEST TRACKING bars ---------------- */
+  let box=null, vid=null, ov=null, ox=null, bars=null, bx=null, hint=null, diag=null, lastDraw=0, uiMode='off';
+  HEAD.uiMode=function(m){ uiMode=m; }; // 'play' (small, by the top-right panel), 'menu' (the HEAD TRACKING panel), 'test' (TEST TRACKING), 'off'
+  function build(){ if(box) return; box=document.createElement('div'); box.id='headui';
+    box.innerHTML='<div class="hv"><video playsinline muted autoplay disablepictureinpicture></video><canvas class="ov" width="320" height="240"></canvas></div>'+
+      '<div class="hc"><div class="hh"></div><div class="hd"></div><button type="button">CENTRE</button></div><canvas class="hb" width="300" height="240"></canvas>';
+    document.body.appendChild(box); vid=box.querySelector('video'); vid.muted=true; vid.setAttribute('playsinline',''); ov=box.querySelector('.ov'); ox=ov.getContext('2d'); bars=box.querySelector('.hb'); bx=bars.getContext('2d');
+    hint=box.querySelector('.hh'); diag=box.querySelector('.hd');
     const bt=box.querySelector('button'); const go=ev=>{ ev.preventDefault(); ev.stopPropagation(); HEAD.calibrate(0.5); };
     bt.addEventListener('pointerdown',go); for(const t of ['touchstart','touchend','click','pointerup']) bt.addEventListener(t,ev=>{ ev.stopPropagation(); if(ev.cancelable) ev.preventDefault(); },{passive:false});
-    box.addEventListener('pointerdown',ev=>ev.stopPropagation()); box.addEventListener('touchstart',ev=>ev.stopPropagation(),{passive:true});
     const css=document.createElement('style'); css.textContent=
       '#headui{position:fixed;z-index:7;right:calc(10px + env(safe-area-inset-right,0px));top:calc(112px + env(safe-area-inset-top,0px));display:none;flex-direction:row-reverse;align-items:flex-start;gap:6px;font:11px "Share Tech Mono",monospace;color:#bfefff;pointer-events:none}'+
       '@media (orientation:portrait){#headui{top:calc(186px + env(safe-area-inset-top,0px))}}'+
       '@media (orientation:landscape) and (max-height:430px){#headui{top:calc(70px + env(safe-area-inset-top,0px));right:calc(192px + env(safe-area-inset-right,0px))}}'+ // phones: left of the II / BOOST / BRAKE column
-      '#headui canvas{position:static!important;left:auto;top:auto;display:block;width:96px;height:72px;border:1px solid rgba(62,230,255,.55);background:#02040c;opacity:.85;border-radius:3px}'+
+      '#headui .hv{position:relative;width:96px;height:72px;border:1px solid rgba(62,230,255,.55);background:#02040c;border-radius:3px;overflow:hidden;flex:none}'+
+      '#headui video{position:absolute!important;left:0;top:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.9;display:block}'+
+      '#headui canvas{position:absolute!important;left:0;top:0;width:100%;height:100%;display:block}'+
+      '#headui .hb{display:none!important}'+
       '#headui .hc{display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:150px}'+
       '#headui .hh{text-align:right;text-shadow:0 0 4px #000,0 0 2px #000}#headui .hh.bad{color:#ff6a7a}'+
+      '#headui .hd{display:none;text-align:right;font-size:10px;color:#9fd8e8;text-shadow:0 0 3px #000;white-space:pre-line}'+
       '#headui button{pointer-events:auto;font:11px "Black Ops One",sans-serif;color:#fff;background:rgba(6,8,18,.6);border:1px solid rgba(62,230,255,.6);border-radius:4px;padding:4px 9px;min-height:28px;touch-action:none}'+
+      '#headui.nocam .hv{width:28px;height:21px;opacity:.7}#headui.nocam .ov{display:none!important}'+ // preview off: a tiny live picture stays (the camera keeps decoding)
       '#headui.menu{top:50%;transform:translateY(-50%);right:calc(12px + env(safe-area-inset-right,0px));flex-direction:column;align-items:flex-end}'+
-      '#headui.menu canvas{width:160px;height:120px;opacity:1}#headui.menu .hc{max-width:170px}'+
+      '#headui.menu .hv,#headui.menu.nocam .hv{width:160px;height:120px;opacity:1}#headui.menu .ov{display:block!important}#headui.menu .hc{max-width:180px}#headui.menu .hd{display:block}'+
       '@media (orientation:portrait){#headui.menu{top:auto;transform:none;bottom:calc(12px + env(safe-area-inset-bottom,0px))}}'+
-      '#headui.nocam canvas{display:none!important}';
+      '#headui.test{left:3vw;right:auto;top:15vh;transform:none;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:10px;max-width:94vw}'+
+      '#headui.test .hv,#headui.test.nocam .hv{width:min(69vh,40vw);height:auto;aspect-ratio:4/3;opacity:1}#headui.test .ov{display:block!important}'+
+      '#headui.test .hb{display:block!important;position:static!important;width:min(46vh,26vw);height:auto;aspect-ratio:5/4}'+
+      '#headui.test .hc{max-width:26vw;align-items:flex-start}#headui.test .hd{display:block;text-align:left;font-size:12px}#headui.test .hh{text-align:left}'+
+      '@media (orientation:portrait){#headui.test{top:12vh;flex-direction:column}#headui.test .hv{width:84vw}#headui.test .hb{width:84vw;aspect-ratio:2/1}#headui.test .hc{max-width:84vw}}';
     document.head.appendChild(css); }
-  function ui(t){ const show=uiMode!=='off'&&(st.run||st.phase==='starting'||(uiMode==='menu'&&HEAD.anyOn()&&HEAD.usable()));
+  HEAD.diag=function(){ const cam=D.cam==='ON'?(D.camW?D.camW+'x'+D.camH:'ON')+(D.vfps>0?' '+D.vfps+'fps':D.vfps===0&&st.run?' NO FRAMES':''):D.cam;
+    const trk=D.trk?(D.trk+' '+(D.trkState||'')+(D.from==='app'?' (app)':D.from==='cdn'?' (cdn)':'')):'-';
+    return 'CAM '+cam+' | TRACKER '+trk+' | FACE '+(st.run?(D.face?'YES':'NO'):'-')+' | '+(st.run?Math.round(D.hz)+'Hz '+Math.round(D.ms)+'ms':'-')+(D.glLost?' | GL RESET x'+D.glLost:''); };
+  function ui(t){ const show=uiMode!=='off'&&(st.run||st.phase==='starting'||uiMode==='test'||(uiMode==='menu'&&HEAD.anyOn()&&HEAD.usable()));
     if(!show){ if(box&&box.style.display!=='none') box.style.display='none'; return; }
-    if(!box) build(); if(box.style.display!=='flex') box.style.display='flex';
-    box.classList.toggle('menu',uiMode==='menu'); box.classList.toggle('nocam',!S.prev);
+    build(); if(box.style.display!=='flex') box.style.display='flex';
+    box.classList.toggle('menu',uiMode==='menu'); box.classList.toggle('test',uiMode==='test'); box.classList.toggle('nocam',!S.prev&&uiMode==='play');
     const bad=HEAD.lost||!!st.err; const msg=st.err?st.err.toUpperCase():st.msgT>t?st.msg:st.phase==='starting'?'STARTING CAMERA...':HEAD.lost?'FACE LOST - LOOK AT THE SCREEN':!cal&&st.run?'CENTRING...':'';
     if(hint.textContent!==msg) hint.textContent=msg; hint.classList.toggle('bad',bad&&msg!=='');
-    if(!S.prev||t-lastDraw<1/15) return; lastDraw=t; const W=cv.width, H=cv.height;
-    cx.save(); cx.fillStyle='#02040c'; cx.fillRect(0,0,W,H);
-    // mirrored like a selfie view
-    cx.translate(W,0); cx.scale(-1,1);
-    if(video&&video.readyState>=2){ try{ cx.drawImage(video,0,0,W,H); }catch(e){} }
-    else if(SIM&&st.run){ cx.strokeStyle='rgba(62,230,255,.25)'; cx.strokeRect(W*0.3,H*0.2,W*0.4,H*0.6); }
-    if(faceBox){ const b=faceBox; cx.strokeStyle=HEAD.lost?'#ff6a7a':'#5dff7a'; cx.lineWidth=2; cx.strokeRect(b.x*W,b.y*H,b.w*W,b.h*H);
-      if(SIM){ cx.beginPath(); cx.ellipse((b.x+b.w/2)*W,(b.y+b.h/2)*H,b.w*W*0.42,b.h*H*0.45,out.roll,0,Math.PI*2); cx.stroke(); } }
-    cx.restore();
-    // pose readout: a dot for yaw / pitch, a bar for roll
-    cx.fillStyle='rgba(255,210,58,.9)'; cx.beginPath(); cx.arc(W/2+clamp(out.yaw,-1,1)*W*0.4,H/2-clamp(out.pitch,-1,1)*H*0.4,3,0,Math.PI*2); cx.fill();
-    cx.strokeStyle='rgba(255,79,216,.9)'; cx.lineWidth=2; cx.beginPath(); cx.moveTo(W/2-14*Math.cos(out.roll),H-8-14*Math.sin(out.roll)); cx.lineTo(W/2+14*Math.cos(out.roll),H-8+14*Math.sin(out.roll)); cx.stroke();
-    cx.fillStyle='rgba(190,240,255,.8)'; cx.font='10px monospace'; cx.fillText(st.src||'',4,11); }
+    if(uiMode!=='play'){ const dg=HEAD.diag().replace(/ \| /g,'\n')+(D.err?'\nlast: '+D.err:''); if(diag.textContent!==dg) diag.textContent=dg; }
+    if(t-lastDraw<1/15) return; lastDraw=t;
+    // overlay: face box + landmarks (mirrored like the picture), pose dot / tilt bar
+    const W=ov.width, H=ov.height; ox.clearRect(0,0,W,H);
+    if(!video){ ox.fillStyle='#02040c'; ox.fillRect(0,0,W,H); if(!SIM){ ox.fillStyle='rgba(190,240,255,.6)'; ox.font='16px monospace'; ox.textAlign='center'; ox.fillText(st.phase==='starting'?'starting camera...':st.err?'camera off':'camera off',W/2,H/2); ox.textAlign='left'; } }
+    const mx=x=>(1-x)*W;
+    if(faceBox){ const b=faceBox; ox.strokeStyle=HEAD.lost?'#ff6a7a':'#5dff7a'; ox.lineWidth=3; ox.strokeRect(mx(b.x+b.w),b.y*H,b.w*W,b.h*H);
+      if(SIM){ ox.beginPath(); ox.ellipse(mx(b.x+b.w/2),(b.y+b.h/2)*H,b.w*W*0.42,b.h*H*0.45,-out.roll,0,Math.PI*2); ox.stroke(); } }
+    if(facePts&&uiMode!=='play'){ ox.fillStyle='rgba(120,255,200,.85)'; const s=facePts.length<20?4:2; for(let i=0;i<facePts.length;i+=2) ox.fillRect(mx(facePts[i])-s/2,facePts[i+1]*H-s/2,s,s); }
+    ox.fillStyle='rgba(255,210,58,.95)'; ox.beginPath(); ox.arc(W/2+clamp(out.yaw,-1,1)*W*0.4,H/2-clamp(out.pitch,-1,1)*H*0.4,5,0,Math.PI*2); ox.fill();
+    ox.strokeStyle='rgba(255,79,216,.95)'; ox.lineWidth=3; ox.beginPath(); ox.moveTo(W/2-24*Math.cos(out.roll),H-14-24*Math.sin(out.roll)); ox.lineTo(W/2+24*Math.cos(out.roll),H-14+24*Math.sin(out.roll)); ox.stroke();
+    if(uiMode==='test') drawBars(); }
+  // TEST TRACKING: live bars for x / y / z / turn / nod / tilt
+  function drawBars(){ const W=bars.width, H=bars.height; bx.clearRect(0,0,W,H); bx.fillStyle='rgba(2,4,12,.85)'; bx.fillRect(0,0,W,H);
+    const rows=[['X  (move L/R)',out.x,1.2,''],['Y  (move up/down)',out.y,1.2,''],['Z  (near / far)',out.z,1.2,''],['TURN',out.yaw,0.6,'deg'],['NOD',out.pitch,0.5,'deg'],['TILT',out.roll,0.6,'deg']];
+    const rh=H/rows.length; bx.font='13px monospace'; bx.textBaseline='middle';
+    rows.forEach(([n,v,rng,u],i)=>{ const y=i*rh+rh/2, x0=8, bw=W-16, cxm=x0+bw/2, k=clamp(fin(v)?v/rng:0,-1,1);
+      bx.fillStyle='rgba(190,240,255,.85)'; bx.fillText(n,x0,y-rh*0.22); const val=u==='deg'?Math.round(v*57.3)+'°':(fin(v)?v.toFixed(2):'NaN'); bx.textAlign='right'; bx.fillText(val,x0+bw,y-rh*0.22); bx.textAlign='left';
+      bx.fillStyle='rgba(255,255,255,.12)'; bx.fillRect(x0,y+rh*0.05,bw,rh*0.28); bx.fillStyle=HEAD.tracking?'#40f0ff':'#ff6a7a'; bx.fillRect(Math.min(cxm,cxm+k*bw/2),y+rh*0.05,Math.abs(k*bw/2),rh*0.28);
+      bx.fillStyle='#fff'; bx.fillRect(cxm-1,y+rh*0.02,2,rh*0.34); }); }
   /* ---------------- the panel text (drawn by each page's menu code) ---------------- */
   HEAD.statusText=function(){ if(HEAD.avail==='noapp') return 'HEAD TRACKING NEEDS THE APP LINK';
     if(st.err) return 'CAMERA OFF - '+st.err.toUpperCase();
-    if(st.phase==='starting') return 'STARTING CAMERA...';
+    if(st.phase==='starting') return 'STARTING CAMERA + TRACKER...';
     if(st.run) return (HEAD.lost?'FACE LOST':HEAD.tracking?'TRACKING':'CENTRING')+'  ('+st.src+')';
     return HEAD.anyOn()?'CAMERA STARTS WHEN YOU PLAY':'ALL MODES OFF - CAMERA OFF'; };
   HEAD.ITEMS=[
@@ -227,15 +333,20 @@
     {id:'lookS',name:'LOOK AMOUNT',      kind:'num', help:'How far the view swings for a small turn of your head.'},
     {id:'steer',name:'STEER WITH YOUR HEAD', kind:'tog', help:'Tilt your head to bank, nod to climb or dive - hands stay on GUN, MISSILE and throttle. The stick still wins when you use it.'},
     {id:'steerS',name:'STEER SENSITIVITY', kind:'num', help:'Higher = less head movement for a full turn.'},
-    {id:'prev', name:'CAMERA PREVIEW',   kind:'tog', help:'A small picture of the camera with the tracked face box, under the stage panel.'},
-    {id:'cal',  name:'CALIBRATE - CENTRE YOUR FACE', kind:'act', help:'Hold the phone how you like to play, look at the screen and tap: that pose becomes neutral. The CENTRE button under the preview does the same.'}
+    {id:'prev', name:'CAMERA PREVIEW',   kind:'tog', help:'The camera picture with the tracked face box while you play. OFF leaves a tiny picture so the camera keeps running.'},
+    {id:'trk',  name:'TRACKER',          kind:'cyc', vals:['AUTO','FULL (FACE MESH)','LITE (FACE BOX)'], help:'AUTO uses the full face mesh and drops to LITE if the phone struggles. LITE is lighter but reads turn and nod less precisely.'},
+    {id:'cal',  name:'CALIBRATE - CENTRE YOUR FACE', kind:'act', help:'Hold the phone how you like to play, look at the screen and tap: that pose becomes neutral. The CENTRE button under the preview does the same.'},
+    {id:'test', name:'TEST TRACKING',    kind:'go', help:'Shows the camera, the tracked face and live bars for every head movement, plus what the tracker is doing - use it to check tracking works on your phone.'}
   ];
-  HEAD.valText=function(it){ if(it.kind==='tog') return S[it.id]?'ON':'OFF'; if(it.kind==='num') return '■'.repeat(S[it.id])+'□'.repeat(10-S[it.id]); return st.run?'TAP':HEAD.anyOn()?'(CAMERA OFF)':''; };
+  HEAD.valText=function(it){ if(it.kind==='tog') return S[it.id]?'ON':'OFF'; if(it.kind==='num') return '■'.repeat(S[it.id])+'□'.repeat(10-S[it.id]);
+    if(it.kind==='cyc') return it.vals[S[it.id]|0]+(it.id==='trk'&&S.trk===0&&liteForced?' > LITE':''); if(it.kind==='go') return '>'; return st.run?'TAP':HEAD.anyOn()?'(CAMERA OFF)':''; };
   // change an item; returns false when it can't (artifact)
   HEAD.change=function(it,dir){ if(!HEAD.usable()&&it.id!=='prev') return false;
     if(it.kind==='tog'){ S[it.id]=!S[it.id]; if(S[it.id]&&it.id!=='prev') HEAD.retry(); }
     else if(it.kind==='num'){ S[it.id]=dir==null?(S[it.id]>=10?1:S[it.id]+1):Math.max(1,Math.min(10,S[it.id]+dir)); }
+    else if(it.kind==='cyc'){ S[it.id]=((S[it.id]|0)+(dir||1)+it.vals.length)%it.vals.length; liteForced=false; HEAD.retry(); if(st.run||st.phase==='starting'){ stop(); } }
     else if(it.kind==='act'){ if(!st.run) return false; HEAD.calibrate(0.6); }
+    else if(it.kind==='go'){ HEAD.retry(); return true; }
     HEAD.save(); return true; };
-  window.__head={S, pose:out, state:st, tgt:()=>tgt, cal:()=>cal, avail:()=>HEAD.avail};
+  window.__head={S, pose:out, state:st, D, tgt:()=>tgt, cal:()=>cal, avail:()=>HEAD.avail, solver:()=>solverKind, lite:()=>liteForced};
 })();

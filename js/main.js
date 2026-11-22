@@ -199,7 +199,9 @@
       if(k==='back'){ go('title'); sel=4; } return; }
     if(screen==='head'){ const IT=HEAD.ITEMS, n=IT.length+1; if(k==='up') sel=(sel+n-1)%n, A.sfx.menu(); if(k==='down') sel=(sel+1)%n, A.sfx.menu();
       if(k==='back'||(k==='ok'&&sel===IT.length)){ go('options'); sel=9; return; }
-      const it=IT[sel]; if(it&&(k==='ok'||((k==='left'||k==='right')&&it.kind!=='act'))){ const ok=HEAD.change(it,k==='left'?-1:k==='right'?1:null); if(ok) A.sfx.menu(); else { A.sfx.back(); headMsgT=2.2; } } return; }
+      const it=IT[sel]; if(it&&it.kind==='go'){ if(k==='ok'){ if(HEAD.change(it)) go('headtest'); else { A.sfx.back(); headMsgT=2.2; } } return; }
+      if(it&&(k==='ok'||((k==='left'||k==='right')&&it.kind!=='act'))){ const ok=HEAD.change(it,k==='left'?-1:k==='right'?1:null); if(ok) A.sfx.menu(); else { A.sfx.back(); headMsgT=2.2; } } return; }
+    if(screen==='headtest'){ if(k==='ok'||k==='back'){ go('head'); sel=HEAD.ITEMS.findIndex(i=>i.id==='test'); } return; }
     if(screen==='play'&&G.paused){ const L=menus.pause; if(k==='up') sel=(sel+L.length-1)%L.length, A.sfx.menu(); if(k==='down') sel=(sel+1)%L.length, A.sfx.menu(); if(k==='back') setPause(false);
       if(k==='ok'){ if(sel===0) setPause(false); else if(sel===1){ setPause(false); G.retryStage(); } else if(sel===2){ setPause(false); startGame(G.attack); } else if(sel===3){ VC.FB&&VC.FB.feltBad(); A.sfx.ok(); } else if(sel===4){ VC.FB&&VC.FB.show(); } else { setPause(false); toTitle(); } } return; }
     if(screen==='results'){ if(k==='ok'&&scrT>2){ if(qualifies(lastResult.score)) startEntry(); else { go('ranking'); } } return; }
@@ -265,8 +267,8 @@
     if(!G.paused&&!window.__vcx.freeze){ let left=dt, n=0; while(left>1e-4&&n<8){ const st=Math.min(1/30,left); G.update(st); left-=st; n++; } }
     // head tracking: the camera runs while a mode is on and you are flying (or the HEAD TRACKING panel is open); the view effects
     // are applied for the render + HUD only, then the nominal camera comes back for the game logic
-    const flyingNow=screen==='play'&&!G.paused&&G.mode==='play', inHead=screen==='head';
-    HEAD.want(flyingNow,inHead); HEAD.uiMode(inHead?'menu':flyingNow?'play':'off'); HEAD.update(dt/FAST);
+    const flyingNow=screen==='play'&&!G.paused&&G.mode==='play', inHead=screen==='head', inTest=screen==='headtest';
+    HEAD.want(flyingNow,inHead,inTest); HEAD.uiMode(inTest?'test':inHead?'menu':flyingNow?'play':'off'); HEAD.update(dt/FAST);
     const useCam=flyingNow||inHead; if(useCam){ const pp=G.player&&G.player.position; HEAD.applyCam(E.camera,pp?E.camera.position.distanceTo(pp):22); }
     E.renderer.render(E.scene,E.camera);
     H.draw(); overlay(dt);
@@ -315,8 +317,9 @@
       txt(TT?'tap to change - left / right half for volume':'left / right to change',W/2,Hh*0.93,13,C.dim,'center'); return; }
     if(screen==='head'){ x.fillStyle='rgba(2,4,12,.66)'; x.fillRect(0,0,W,Hh); st('HEAD TRACKING',W/2,Hh*0.08,30,C.pink);
       const IT=HEAD.ITEMS, n=IT.length+1, noapp=!HEAD.usable(), land=W>Hh*1.2, half=Math.ceil(n/2), right=land?W-196:W*0.97;
-      const stc=noapp||HEAD.state.err?C.red:HEAD.tracking?'#5dff7a':HEAD.lost?C.yel:C.cyan; txt(HEAD.statusText(),W/2,Hh*0.155,13,stc,'center');
-      const y0=land?Hh*0.25:Hh*0.21, rh=land?Math.max(TT?42:32,Math.min(44,(Hh*0.55)/half)):Math.max(TT?44:30,Math.min(52,(Hh*0.5)/n));
+      const stc=noapp||HEAD.state.err?C.red:HEAD.tracking?'#5dff7a':HEAD.lost?C.yel:C.cyan; txt(HEAD.statusText(),W/2,Hh*0.15,13,stc,'center');
+      if(!noapp) txt(HEAD.diag(),W/2,Hh*0.15+15*sc,10,'rgba(190,240,255,.7)','center');
+      const y0=land?Hh*0.27:Hh*0.21, rh=land?Math.max(TT?42:32,Math.min(44,(Hh*0.55)/half)):Math.max(TT?44:30,Math.min(52,(Hh*0.5)/n));
       IT.concat([{name:'BACK',kind:'back'}]).forEach((it,i)=>{ let y=y0+i*rh, x0=W*0.03, x1=right; if(land){ const c=i<half?0:1, cw=(right-W*0.03)/2; y=y0+(i%half)*rh; x0=W*0.03+c*cw+(c?4:0); x1=x0+cw-4; }
         const on=i===sel, xm=(x0+x1)/2, dim=noapp&&it.id!=='prev'&&it.kind!=='back';
         hit(x0,y-rh/2,x1-x0,rh,(X)=>{ sel=i; if(it.kind==='num') menuKey(X<xm?'left':'right'); else menuKey('ok'); });
@@ -330,6 +333,10 @@
       else if(it){ x.globalAlpha=0.9; wrapAt(x,(headMsgT>0&&it.kind==='act'?'Turn a mode on first. ':'')+it.help,W*0.04,hy,right-W*0.06,13); x.globalAlpha=1; }
       else txt(TT?'tap a row to change it':'left / right to change, OK to toggle',W*0.04,hy,13,C.dim,'left');
       return; }
+    if(screen==='headtest'){ x.fillStyle='rgba(2,4,12,.9)'; x.fillRect(0,0,W,Hh); st('TEST TRACKING',W/2,Hh*0.07,26,C.pink);
+      hit(0,0,W,Hh,()=>menuKey('back'));
+      txt(!HEAD.usable()?'Head tracking needs the app link.':'Move, turn, nod and tilt your head: the face box and the bars should follow.',W/2,Hh*0.125,12,C.dim,'center');
+      txt(TT?'tap anywhere to go back':'OK / BACK to go back',W/2,Hh*0.965,12,C.dim,'center'); return; }
     if(screen==='ranking'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('RANKING',W/2,Hh*0.1,36,C.pink);
       RANK.forEach((r,i)=>{ const y=Hh*0.2+i*Hh*0.066; const c=r.me?C.yel:'#fff'; txt(String(i+1).padStart(2,' ')+(i===0?'ST':i===1?'ND':i===2?'RD':'TH'),W*0.26,y,16,C.cyan,'left',F.disp); txt(r.n,W*0.38,y,20,c,'left',F.disp); txt(H.pad(r.s,9),W*0.62,y,20,c,'right',F.disp); txt(r.g,W*0.7,y,20,r.g==='S'?C.pink:C.yel,'left',F.disp); if(r.a) txt('SA',W*0.75,y,12,C.dim,'left'); });
       for(const r of RANK) delete r.me; txt('press any button',W/2,Hh*0.94,13,C.dim,'center'); return; }
