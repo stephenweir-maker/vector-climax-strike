@@ -1,7 +1,14 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="en">
 <meta charset="utf-8">
 <title>Vector Climax Strike</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#020208">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
@@ -42,6 +49,17 @@
   .tb[data-b="pause"]{ right:calc(14px + env(safe-area-inset-right,0px)); top:calc(64px + env(safe-area-inset-top,0px)); width:44px; height:44px; font-size:12px; }
   @media (orientation:portrait){ .tb[data-b="pause"]{ top:calc(132px + env(safe-area-inset-top,0px)); } }
   @media (max-height:430px){ #tstick{ width:120px; height:120px; } #tknob{ left:35px; top:35px; } .tb[data-b="mis"]{ width:92px; height:92px; } .tb[data-b="gun"]{ right:calc(124px + env(safe-area-inset-right,0px)); width:74px; height:74px; } .tb[data-b="clx"]{ right:calc(122px + env(safe-area-inset-right,0px)); bottom:calc(104px + env(safe-area-inset-bottom,0px)); width:62px; height:62px; } .tb[data-b="roll"]{ bottom:calc(128px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; } .tb[data-b="boost"]{ bottom:calc(202px + env(safe-area-inset-bottom,0px)); width:52px; height:52px; } .tb[data-b="brake"]{ right:calc(124px + env(safe-area-inset-right,0px)); bottom:calc(180px + env(safe-area-inset-bottom,0px)); width:50px; height:50px; } }
+  /* touch size option (S / M / L) */
+  #touch .tb{ zoom:var(--ts,1); }
+  /* FEEDBACK panel (DOM so the note can use the phone keyboard) */
+  #fb{ position:fixed; inset:0; z-index:8; display:none; align-items:center; justify-content:center; background:rgba(2,4,12,.78); font:14px 'Share Tech Mono',monospace; color:#fff; }
+  #fb .fbbox{ width:min(520px,92vw); max-height:94vh; overflow:auto; background:#0a0c1a; border:1.5px solid #ff4fd8; padding:14px 16px; box-sizing:border-box; }
+  #fb .fbt{ font:22px 'Black Ops One',sans-serif; color:#ff4fd8; margin-bottom:8px; }
+  #fb .fbq{ display:flex; align-items:center; gap:6px; margin:6px 0; flex-wrap:wrap; } #fb .fbq span{ flex:1 1 130px; color:#40f0ff; }
+  #fb button{ min-width:44px; min-height:44px; background:#141830; color:#fff; border:1px solid rgba(255,255,255,.35); font:16px 'Black Ops One',sans-serif; border-radius:6px; }
+  #fb button.on{ background:#ff4fd8; border-color:#fff; } #fb button:focus{ outline:2px solid #ffd23a; }
+  #fb textarea{ width:100%; box-sizing:border-box; height:64px; margin:8px 0; background:#05060b; color:#fff; border:1px solid rgba(255,255,255,.3); font:14px 'Share Tech Mono',monospace; padding:6px; }
+  #fb .fbr{ display:flex; gap:10px; } #fb .fbr button{ flex:1; } #fbmsg{ color:#ffd23a; margin-top:6px; min-height:18px; }
 </style>
 <canvas id="gl"></canvas>
 <canvas id="hud"></canvas>
@@ -66,7 +84,7 @@
 <script src="js/wing.js"></script>
 <script src="js/trench.js"></script>
 <script src="js/stages.js"></script>
+<script src="js/feedback.js"></script>
 <script src="js/hud.js"></script>
+<script src="js/head.js"></script>
 <script src="js/main.js"></script>
-
-</body></html>

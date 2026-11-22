@@ -23,14 +23,14 @@
     // screen effects
     if(P.climaxT>0){ const g=x.createRadialGradient(W/2,Hh/2,Hh*0.25,W/2,Hh/2,Hh*0.85); g.addColorStop(0,'rgba(255,79,216,0)'); g.addColorStop(1,'rgba(120,60,255,.3)'); x.fillStyle=g; x.fillRect(0,0,W,Hh); }
     if(G.flashR>0){ const g=x.createRadialGradient(W/2,Hh/2,Math.min(W,Hh)*0.28,W/2,Hh/2,Math.hypot(W,Hh)*0.6); g.addColorStop(0,'rgba(255,0,0,0)'); g.addColorStop(1,'rgba(255,20,30,'+Math.min(0.6,G.flashR*1.5)*(H.flashK==null?1:H.flashK)+')'); x.fillStyle=g; x.fillRect(0,0,W,Hh); }
-    if(G.flashW>0){ x.fillStyle='rgba(255,255,255,'+Math.min(1,G.flashW*1.6)+')'; x.fillRect(0,0,W,Hh); }
+    if(G.flashW>0){ x.fillStyle='rgba(255,255,255,'+Math.min(1,G.flashW*1.6)*(H.flashK==null?1:H.flashK)+')'; x.fillRect(0,0,W,Hh); }
     if(P.armor<=25&&!P.dead){ const k=0.11+0.07*Math.sin(t*3); /* thin edge vignette, slow pulse */ const R=Math.hypot(W,Hh)/2, g=x.createRadialGradient(W/2,Hh/2,R*0.78,W/2,Hh/2,R); g.addColorStop(0,'rgba(255,0,0,0)'); g.addColorStop(1,'rgba(255,0,0,'+k+')'); x.fillStyle=g; x.fillRect(0,0,W,Hh); }
     const hud = ph!=='ending'&&ph!=='gameover'&&ph!=='orbit';
     if(ph==='orbit'&&!G.paused){ top0(); banners(); if(G.whiteK>0){ x.fillStyle='rgba(255,255,255,'+G.whiteK+')'; x.fillRect(0,0,W,Hh); } nextCard(); return; }
     glare();
     // paused: keep the frozen frame and the corner HUD, but no centre banners or prompts under the pause menu
     if(G.paused){ if(hud){ top(); bottom(); thrLever(); } pause(); return; }
-    if(hud){ fx(); world(); wingTags(); sight(); impacts(); top(); bottom(); thrLever(); warnings(); }
+    if(hud){ fx(); world(); wingTags(); sight(); impacts(); top(); bottom(); radar(); thrLever(); warnings(); }
     banners(); prompt(); tip(); cpop();
     if(ph==='clear') clearPanel();
     if(ph==='branch') branch();
@@ -207,6 +207,17 @@
     x.globalAlpha=1;
     if(G.multiT>0&&G.multi>=4&&!G.mWarn&&!G.eoMsg&&!(G.clxN>0)&&!(G.P.climaxT>0)){ x.globalAlpha=Math.min(1,G.multiT/0.3); strokeTxt('x'+G.multi+' MULTI LOCK  +'+G.multi*(G.P.climaxT>0?200:300),W/2,Hh*0.3,22,C.yel); x.globalAlpha=1; }
   }
+  // radar (keys / pad layout, bottom centre; as Vector Strike's): enemies red (EO targets yellow, ground squares), wingmen cyan, ahead = up.
+  // Phones skip it (the touch gauges sit there; impact arrows + DANGER already flag what is behind).
+  function radar(){ if(H.touch||!G.P||G.ph==='takeoff'||G.ph==='intro'||G.ph==='clear'||G.ph==='branch'||G.ph==='continue') return; const P=G.P, rr=Math.max(28,Math.min(48,Hh*0.066)), cx=W/2, cy=Hh-rr-12*sc, range=900;
+    const jq=E.toScreen(P.x,P.y,0), cover=jq&&Math.abs(jq.x-cx)<rr+60*sc&&jq.y>cy-rr-50*sc;
+    x.save(); x.globalAlpha=cover?0.35:1; x.fillStyle='rgba(4,10,24,.62)'; x.beginPath(); x.arc(cx,cy,rr,0,Math.PI*2); x.fill();
+    x.strokeStyle='rgba(62,230,255,.55)'; x.lineWidth=1.2*sc; x.beginPath(); x.arc(cx,cy,rr,0,Math.PI*2); x.stroke(); x.strokeStyle='rgba(62,230,255,.18)'; x.beginPath(); x.arc(cx,cy,rr*0.5,0,Math.PI*2); x.moveTo(cx-rr,cy); x.lineTo(cx+rr,cy); x.moveTo(cx,cy-rr); x.lineTo(cx,cy+rr); x.stroke();
+    const sw=(G.t*1.6)%(Math.PI*2); x.strokeStyle='rgba(62,230,255,.35)'; x.beginPath(); x.moveTo(cx,cy); x.lineTo(cx+Math.cos(sw)*rr,cy+Math.sin(sw)*rr); x.stroke();
+    const dot=(dz,dx,col,sz,sq)=>{ let px=dx/range*rr*1.6, py=dz/range*rr; const L=Math.hypot(px,py); if(L>rr-3){ px*=(rr-3)/L; py*=(rr-3)/L; } x.fillStyle=col; if(sq) x.fillRect(cx+px-sz,cy+py-sz,sz*2,sz*2); else { x.beginPath(); x.arc(cx+px,cy+py,sz,0,Math.PI*2); x.fill(); } };
+    for(const e of G.ENS){ if(e.dead||e.noHit||e.z<-1400) continue; dot(e.z,e.x-P.x,e.eo||e.boss?C.yel:C.red,(e.boss?3.6:e.eo?3.2:2.3)*sc,!!e.ground); }
+    for(const w of G.WING||[]){ if(w.state==='gone'||w.state==='down') continue; dot(w.z,w.x-P.x,C.cyan,2.6*sc); }
+    x.fillStyle='#fff'; x.beginPath(); x.moveTo(cx,cy-4*sc); x.lineTo(cx+3.2*sc,cy+3*sc); x.lineTo(cx-3.2*sc,cy+3*sc); x.closePath(); x.fill(); x.restore(); }
   function warnings(){
     const t=G.t, b=(t*5|0)%2, P=G.P;
     if(G.mWarn&&b&&G.tip!=='roll'){ strokeTxt('MISSILE',W/2,Hh*0.33,28,C.red); }

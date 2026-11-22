@@ -6,14 +6,14 @@
   const FAST=Math.max(1,Math.min(6,+(Q.get('fast')||1))); // tests only
   const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
   /* ---------------- options ---------------- */
-  const OPT=Object.assign({autoFire:false,autoMissile:false,pixel:true,shake:true,invert:false,music:8,sfx:8},store.get('vcx_opt',{}));
+  const OPT=Object.assign({autoFire:false,autoMissile:false,pixel:true,shake:true,invert:false,music:8,sfx:8,flash:true,touchSize:1},store.get('vcx_opt',{}));
   if(OPT.mixV!==2){ if(OPT.music===7) OPT.music=8; OPT.mixV=2; }
   if(OPT.fireV!==2){ OPT.autoFire=false; OPT.fireV=2; } // v9.1: the vulcan fires only while the button is held (auto is an option again, off by default) // v8 mix: music default 8 (was 7); bumps the old default once
-  function applyOpt(){ G.opt.autoFire=OPT.autoFire; G.opt.autoMissile=OPT.autoMissile; G.opt.shake=OPT.shake; E.pix=OPT.pixel?0.5:1; E.resize(); A.vol.music=OPT.music/10; A.vol.sfx=OPT.sfx/10; A.setVol(); document.body.classList.toggle('pixel',OPT.pixel); document.getElementById('gl').classList.toggle('pixel',OPT.pixel); store.set('vcx_opt',OPT); }
+  function applyOpt(){ H.flashK=OPT.flash?1:0.4; try{ document.documentElement.style.setProperty('--ts',String([0.85,1,1.15][OPT.touchSize|0]||1)); }catch(e){} G.opt.autoFire=OPT.autoFire; G.opt.autoMissile=OPT.autoMissile; G.opt.shake=OPT.shake; E.pix=OPT.pixel?0.5:1; E.resize(); A.vol.music=OPT.music/10; A.vol.sfx=OPT.sfx/10; A.setVol(); document.body.classList.toggle('pixel',OPT.pixel); document.getElementById('gl').classList.toggle('pixel',OPT.pixel); store.set('vcx_opt',OPT); }
   /* ---------------- ranking ---------------- */
   // C2 rescale (whole run, stages 1-4 + the bridge): bot runs score novice ~2.6 M (2 continues), average ~4.7 M, expert ~5-6 M
-  const DEFRANK=[['SVN',6500000,'S'],['VGA',5800000,'S'],['W7 ',5200000,'A'],['JNO',4700000,'A'],['BRK',4200000,'B'],['MSH',3600000,'B'],['REX',3000000,'C'],['SOV',2400000,'C'],['HLC',1500000,'D'],['ZER',800000,'D']];
-  let RANK=store.get('vcx_rank2',null)||DEFRANK.map(r=>({n:r[0],s:r[1],g:r[2],a:0}));
+  const DEFRANK=[['SVN',7400000,'S'],['VGA',6600000,'S'],['W7 ',6000000,'A'],['JNO',5400000,'A'],['BRK',4800000,'B'],['MSH',4100000,'B'],['REX',3400000,'C'],['SOV',2700000,'C'],['HLC',1800000,'D'],['ZER',900000,'D']];
+  let RANK=store.get('vcx_rank3',null)||DEFRANK.map(r=>({n:r[0],s:r[1],g:r[2],a:0}));
   /* ---------------- EX OPTIONS: earned by playing, like ABC. Gameplay ones mark the run "EX" and keep it off the ranking ---------------- */
   const EXL=[
     {id:'stock',name:'MISSILE STOCK 12',hint:'Clear stage 1',game:1},
@@ -29,6 +29,12 @@
   function exUnlock(id){ if(EXS.unl[id]) return; EXS.unl[id]=1; exSave(); G.exToast={name:EXL.find(e=>e.id===id).name,t:0}; A.sfx.bonus&&A.sfx.bonus(); }
   G.exUnlock=exUnlock;
   G.tutSave=()=>store.set('vcx_tut',1);
+  let CLEARED=store.get('vcx_cleared',0)|0; // highest stage cleared (stage select unlocks the next one)
+  G.onStageCleared=n=>{ if(G.demo||G.bot) return; if(n>CLEARED){ CLEARED=n; store.set('vcx_cleared',CLEARED); } };
+  // a run arriving back from stage 5 (stage5.html): ?ending=<run> after SUNFALL, ?over=<run> after a game over there
+  const PEND=(()=>{ try{ const e=Q.get('ending'), o=Q.get('over'); if(e) return Object.assign(JSON.parse(e),{kind:'ending'}); if(o) return Object.assign(JSON.parse(o),{kind:'over'}); }catch(err){} return null; })();
+  function runOut(){ return {score:Math.round(G.score),kills:G.kills,spawned:G.spawned,eo:G.eo,cont:G.cont,contUsed:G.contUsed||0,attack:G.attack?1:0,ex:G.exUsed?1:0}; }
+  function toStage5(run){ try{ location.href='stage5.html?run='+encodeURIComponent(JSON.stringify(run)); }catch(e){ finish(true); } }
   // best rank per stage (shown on the stage result panel)
   const BEST=store.get('vcx_best',{}); const RO='DCBAS';
   G.onStageRank=(n,r)=>{ if(G.demo||G.bot) return BEST[n]||null; const old=BEST[n]; if(!old||RO.indexOf(r)>RO.indexOf(old)){ BEST[n]=r; store.set('vcx_best',BEST); return old?old+' > '+r:null; } return old; };
@@ -44,7 +50,7 @@
   document.addEventListener('visibilitychange',()=>{ if(document.hidden){ for(const k in keys) keys[k]=false; if(screen==='play'&&G.mode==='play'&&!G.paused&&!G.demo&&G.ph!=='ending') setPause(true); A.hold(true); } else { A.hold(false); last=performance.now(); } });
   addEventListener('pagehide',()=>A.hold(true));
   let lastTap={code:'',t:0};
-  function onTap(code){ const now=performance.now(); if((code==='ArrowLeft'||code==='ArrowRight'||code==='KeyA'||code==='KeyD')&&lastTap.code===code&&now-lastTap.t<240) G._dblRoll=true;
+  function onTap(code){ const now=performance.now(); if(code==='KeyH'&&window.HEAD&&HEAD.state.run) HEAD.calibrate(0.5); if((code==='ArrowLeft'||code==='ArrowRight'||code==='KeyA'||code==='KeyD')&&lastTap.code===code&&now-lastTap.t<240) G._dblRoll=true;
     if(code==='KeyW'&&lastTap.code===code&&now-lastTap.t<280) G.inp.slam=true; if(code==='KeyS'&&lastTap.code===code&&now-lastTap.t<280) G.inp.slamDn=true; if(code==='ShiftLeft'||code==='ShiftRight') G.inp.slam=true;
     lastTap={code,t:now}; }
   const touch={on:false,stick:null,sx:0,sy:0,x:0,y:0,btn:{},latch:{}};
@@ -62,6 +68,7 @@
     if(pad.x||pad.y){ x=pad.x; y=-pad.y; }
     if(touch.stick!=null){ x=touch.x; y=-touch.y; }
     const L=Math.hypot(x,y); if(L>1){ x/=L; y/=L; }
+    let hs=null; if(screen==='play'&&!G.paused&&window.HEAD&&L<0.15&&!G.bot){ hs=HEAD.steer(); } G.headSteer=!!hs; // STEER WITH YOUR HEAD (any stick / key / pad input wins)
     const tb=n=>!!touch.btn[n]||!!touch.latch[n];
     const now={
       mis:k('KeyZ')||k('KeyJ')||k('Enter')||!!pad.b.mis||tb('mis'),
@@ -74,7 +81,7 @@
       ok:k('Enter')||k('KeyZ')||k('KeyJ')||k('Space')||!!pad.b.ok
     };
     if(touch.stick!=null||Object.keys(touch.btn).length) G.dev='touch'; else if(pad.x||pad.y||Object.values(pad.b).some(Boolean)) G.dev='pad'; else if(Object.values(keys).some(Boolean)) G.dev='key'; else if(!G.dev) G.dev=touch.on?'touch':'key'; G.touchLand=touch.on&&innerWidth>innerHeight;
-    I.x=x; I.y=OPT.invert?-y:y;
+    I.x=x; I.y=OPT.invert?-y:y; if(hs){ I.x=hs.x; I.y=hs.y; }
     I.thrUp=(k('KeyW')?1:0)+(k('ShiftLeft')||k('ShiftRight')?1.5:0)+Math.max(pad.rt,Math.max(0,-pad.ry)); I.thrDn=(k('KeyS')?1:0)+Math.max(pad.lt,Math.max(0,pad.ry)); I.thrAbs=null;
     // touch: BOOST / BRAKE by the right thumb. A tap = full throttle for 3 s (brake 2.2 s), holding keeps it; then back to cruise 1.0
     if(touch.on&&G.dev==='touch'){ const tn=performance.now(), b=tb('boost'), r=tb('brake');
@@ -167,28 +174,34 @@
     if(G.ph==='branch'){ I.x=G._botRoute==='low'?-1:1; I.misP=G.phT>1; } if(G.ph==='continue') I.misP=true; }
   /* ---------------- screens ---------------- */
   let idleT=0;
-  let screen='boot', sel=0, scrT=0, ending=null, entry=null, lastResult=null;
+  let screen='boot', sel=0, scrT=0, ending=null, entry=null, lastResult=null, headMsgT=0;
   const menus={
-    title:['ARCADE','SCORE ATTACK','HOW TO PLAY','OPTIONS','EX OPTIONS','RANKING'],
-    pause:['RESUME','RETRY STAGE','RESTART FROM STAGE 1','QUIT TO TITLE'],
-    options:['VULCAN','MISSILES','FLIGHT CONTROLS','PIXEL FILTER','SCREEN SHAKE','MUSIC','SOUND','BACK']
+    title:['ARCADE','STAGE SELECT','SCORE ATTACK','HOW TO PLAY','OPTIONS','EX OPTIONS','RANKING','FEEDBACK'],
+    pause:['RESUME','RETRY STAGE','RESTART FROM STAGE 1','THAT FELT BAD','FEEDBACK','QUIT TO TITLE'],
+    options:['VULCAN','MISSILES','FLIGHT CONTROLS','PIXEL FILTER','SCREEN SHAKE','FLASHES','TOUCH SIZE','MUSIC','SOUND','HEAD TRACKING','BACK']
   };
   function go(s){ screen=s; sel=0; scrT=0; if(lastMk==='back'||s==='title') A.sfx.back(); else A.sfx.menu(); }
   let lastMk='';
   function menuKey(k){
     lastMk=k;
-    if(screen==='boot'){ if(k==='ok'){ A.unlock(); toTitle(); } return; }
+    if(VC.FB&&VC.FB.open){ VC.FB.nav(k); return; }
+    if(screen==='boot'){ if(k==='ok'){ A.unlock(); if(PEND) pending(); else toTitle(); } return; }
+    if(screen==='stages'){ const n=5; if(k==='up') sel=(sel+n)%(n+1), A.sfx.menu(); if(k==='down') sel=(sel+1)%(n+1), A.sfx.menu(); if(k==='back'||(k==='ok'&&sel===n)){ go('title'); sel=1; return; }
+      if(k==='ok'){ const st=sel+1; if(st>1&&CLEARED<st-1){ A.sfx.back(); return; } A.sfx.ok(); if(st===5) toStage5({single:1,score:0,cont:3}); else startGame(false,false,st); } return; }
     if(screen==='title'){ const L=menus.title; if(k==='up') sel=(sel+L.length-1)%L.length, A.sfx.menu(); if(k==='down') sel=(sel+1)%L.length, A.sfx.menu();
-      if(k==='ok'){ A.sfx.ok(); if(sel===0) startGame(false); else if(sel===1) startGame(true); else if(sel===2) go('howto'); else if(sel===3) go('options'); else if(sel===4) go('ex'); else go('ranking'); } return; }
-    if(screen==='ex'){ const n=EXL.length+1; if(k==='up') sel=(sel+n-1)%n, A.sfx.menu(); if(k==='down') sel=(sel+1)%n, A.sfx.menu(); if(k==='back'||(k==='ok'&&sel===EXL.length)){ go('title'); sel=4; return; }
+      if(k==='ok'){ A.sfx.ok(); if(sel===0) startGame(false); else if(sel===1) go('stages'); else if(sel===2) startGame(true); else if(sel===3) go('howto'); else if(sel===4) go('options'); else if(sel===5) go('ex'); else if(sel===6) go('ranking'); else VC.FB&&VC.FB.show(()=>{ sel=7; }); } return; }
+    if(screen==='ex'){ const n=EXL.length+1; if(k==='up') sel=(sel+n-1)%n, A.sfx.menu(); if(k==='down') sel=(sel+1)%n, A.sfx.menu(); if(k==='back'||(k==='ok'&&sel===EXL.length)){ go('title'); sel=5; return; }
       const e=EXL[sel]; if(e&&EXS.unl[e.id]&&(k==='ok'||k==='left'||k==='right')){ if(e.vals){ const d=k==='left'?-1:1; EXS.on[e.id]=((EXS.on[e.id]|0)+d+e.vals.length)%e.vals.length; } else EXS.on[e.id]=!EXS.on[e.id]; exSave(); exApply(); A.sfx.menu(); } return; }
-    if(screen==='howto'||screen==='ranking'){ if(k==='ok'||k==='back') { const w=screen; go('title'); sel=w==='howto'?2:5; } return; }
+    if(screen==='howto'||screen==='ranking'){ if(k==='ok'||k==='back') { const w=screen; go('title'); sel=w==='howto'?3:6; } return; }
     if(screen==='options'){ const L=menus.options; if(k==='up') sel=(sel+L.length-1)%L.length, A.sfx.menu(); if(k==='down') sel=(sel+1)%L.length, A.sfx.menu();
       const dir=k==='left'?-1:k==='right'||k==='ok'?1:0;
-      if(dir){ if(sel===0) OPT.autoFire=!OPT.autoFire; if(sel===1) OPT.autoMissile=!OPT.autoMissile; if(sel===2) OPT.invert=!OPT.invert; if(sel===3) OPT.pixel=!OPT.pixel; if(sel===4) OPT.shake=!OPT.shake; if(sel===5) OPT.music=Math.max(0,Math.min(10,OPT.music+(k==='ok'?(OPT.music>=10?-10:1):dir))); if(sel===6) OPT.sfx=Math.max(0,Math.min(10,OPT.sfx+(k==='ok'?(OPT.sfx>=10?-10:1):dir))); if(sel===7&&k==='ok'){ go('title'); sel=3; } applyOpt(); A.sfx.menu(); }
-      if(k==='back'){ go('title'); sel=3; } return; }
+      if(dir){ if(sel===0) OPT.autoFire=!OPT.autoFire; if(sel===1) OPT.autoMissile=!OPT.autoMissile; if(sel===2) OPT.invert=!OPT.invert; if(sel===3) OPT.pixel=!OPT.pixel; if(sel===4) OPT.shake=!OPT.shake; if(sel===5) OPT.flash=!OPT.flash; if(sel===6) OPT.touchSize=((OPT.touchSize|0)+(dir<0?2:1))%3; if(sel===7) OPT.music=Math.max(0,Math.min(10,OPT.music+(k==='ok'?(OPT.music>=10?-10:1):dir))); if(sel===8) OPT.sfx=Math.max(0,Math.min(10,OPT.sfx+(k==='ok'?(OPT.sfx>=10?-10:1):dir))); if(sel===9&&k==='ok'){ go('head'); return; } if(sel===10&&k==='ok'){ go('title'); sel=4; return; } applyOpt(); A.sfx.menu(); }
+      if(k==='back'){ go('title'); sel=4; } return; }
+    if(screen==='head'){ const IT=HEAD.ITEMS, n=IT.length+1; if(k==='up') sel=(sel+n-1)%n, A.sfx.menu(); if(k==='down') sel=(sel+1)%n, A.sfx.menu();
+      if(k==='back'||(k==='ok'&&sel===IT.length)){ go('options'); sel=9; return; }
+      const it=IT[sel]; if(it&&(k==='ok'||((k==='left'||k==='right')&&it.kind!=='act'))){ const ok=HEAD.change(it,k==='left'?-1:k==='right'?1:null); if(ok) A.sfx.menu(); else { A.sfx.back(); headMsgT=2.2; } } return; }
     if(screen==='play'&&G.paused){ const L=menus.pause; if(k==='up') sel=(sel+L.length-1)%L.length, A.sfx.menu(); if(k==='down') sel=(sel+1)%L.length, A.sfx.menu(); if(k==='back') setPause(false);
-      if(k==='ok'){ if(sel===0) setPause(false); else if(sel===1){ setPause(false); G.retryStage(); } else if(sel===2){ setPause(false); startGame(G.attack); } else { setPause(false); toTitle(); } } return; }
+      if(k==='ok'){ if(sel===0) setPause(false); else if(sel===1){ setPause(false); G.retryStage(); } else if(sel===2){ setPause(false); startGame(G.attack); } else if(sel===3){ VC.FB&&VC.FB.feltBad(); A.sfx.ok(); } else if(sel===4){ VC.FB&&VC.FB.show(); } else { setPause(false); toTitle(); } } return; }
     if(screen==='results'){ if(k==='ok'&&scrT>2){ if(qualifies(lastResult.score)) startEntry(); else { go('ranking'); } } return; }
     if(screen==='entry'){ const E_=entry; if(k==='up') E_.c[E_.i]=(E_.c[E_.i]+1)%ALPH.length, A.sfx.menu(); if(k==='down') E_.c[E_.i]=(E_.c[E_.i]+ALPH.length-1)%ALPH.length, A.sfx.menu(); if(k==='left'&&E_.i>0) E_.i--; if(k==='right'&&E_.i<2) E_.i++; if(k==='back'&&E_.i>0) E_.i--;
       if(k==='ok'){ A.sfx.ok(); if(E_.i<2) E_.i++; else finishEntry(); } return; }
@@ -197,36 +210,43 @@
   const ALPH='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .!-';
   function setPause(v){ G.paused=v; sel=0; A.swellMute&&A.swellMute(v); if(v){ A.duck(0.3); A.engine(false); A.sfx.pause(); G.inp.misP=false; } else A.duck(1); }
   function toTitle(){ G.demo=false; G.bot=false; idleT=0; screen='title'; sel=0; scrT=0; G.mode='title'; G.paused=false; G.clearAll(); G.wingClear&&G.wingClear(); G.trenchClear&&G.trenchClear(); G.bridge=null; G.banner=null; G.pr=null; G.objective=null; G.camSnap&&G.camSnap('abc'); if(!G.P) G.reset(); G.mode='title'; G.P.x=0; G.P.y=34; G.P.dead=false; G.P.locks=[]; G.P.climaxT=0; G.setEnv(VC.ENV.coast,false); G.stage=0; A.music('title'); G.player.visible=true; G.whiteK=0; }
-  function startGame(attack,demo){ G.attack=attack; G.reset(); exApply(); G.tut=store.get('vcx_tut',0)?null:{}; G._clxSaid=0; G.demo=!!demo; if(demo){ G.bot=true; }  G.god=Q.get('god')==='1'; G.noTakeoff=Q.get('notakeoff')==='1'; G.bot=G.demo||Q.get('bot')==='1'; G._botRoute=Q.get('route')||(Math.random()<0.5?'low':'high'); screen='play'; G.mode='play'; const n=+(Q.get('stage')||1); if(n>=3&&!G.route) G.route=G._botRoute; G.startStage(Math.max(1,Math.min(4,n))); if(Q.get('boss')==='1'){ const ev=G.stDef.ev, i=ev.findIndex(e=>String(e[1]).includes('bossIn')); G.evI=i; G.st=ev[i][0]-0.2; } }
+  function pending(){ const R=PEND; G.reset(); exApply(); G.score=R.score||0; G.kills=R.kills||0; G.spawned=R.spawned||0; G.eo=R.eo||[null,null,null,null]; G.contUsed=R.contUsed||0; G.cont=R.cont==null?3:R.cont; G.attack=!!R.attack; G.exUsed=!!R.ex; G.s5=R.s5||0; G.s5stars=R.s5stars||0;
+    try{ history.replaceState(null,'',location.pathname); }catch(e){}
+    if(R.single){ toTitle(); return; } // a stage-select SUNFALL run just returns to the title
+    if(R.kind==='ending'){ G.onStageCleared(5); startEnding(); } else { G.mode='play'; G.ph='gameover'; finish(false); } }
+  function startGame(attack,demo,stageN){ G.attack=attack; G.reset(); exApply(); G.tut=store.get('vcx_tut',0)?null:{}; G._clxSaid=0; G.demo=!!demo; if(demo){ G.bot=true; }  G.god=Q.get('god')==='1'; G.noTakeoff=Q.get('notakeoff')==='1'; G.bot=G.demo||Q.get('bot')==='1'; G._botRoute=Q.get('route')||(Math.random()<0.5?'low':'high'); screen='play'; G.mode='play'; const n=stageN||+(Q.get('stage')||1); if(n>=3&&!G.route) G.route=G._botRoute; G.startStage(Math.max(1,Math.min(4,n))); if(Q.get('boss')==='1'){ const ev=G.stDef.ev, i=ev.findIndex(e=>String(e[1]).includes('bossIn')); G.evI=i; G.st=ev[i][0]-0.2; } }
   G.titleTick=function(dt){ const P=G.P; const t=G.t; P.x=Math.sin(t*0.35)*(innerWidth<innerHeight?8:22); P.y=34+Math.sin(t*0.5)*8; P.vx=Math.cos(t*0.35)*0.35*22*3; P.bank=-Math.cos(t*0.35)*0.5; const o=G.player; o.position.set(P.x,P.y,0); o.rotation.set(Math.cos(t*0.5)*0.08,0,P.bank,'XYZ'); for(const b of G.burn){ const s=4.6+Math.random(); b.scale.set(s/5,s/5,1); b.quaternion.copy(E.camera.quaternion); } for(const g of G.plume||[]){ g.scale.set(1.2,1.2,15*(0.9+Math.random()*0.2)); } };
   G.onGameOver=function(){ A.sfx.gameover(); setTimeout(()=>{ finish(false); },1500); };
   G.onEnding=function(){ startEnding(); };
-  G.onBridgeDone=function(){ finish(true); }; // C2: the run ends after the story bridge; stage 5 SUNFALL + the real ending come in C3
-  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); rank=pts>6000?'S':pts>5000?'A':pts>3800?'B':pts>2300?'C':'D'; // C2 scale: average clean clear ~4.7 M -> pts ~5800 (A), novice with 2 continues ~2700 (C)
+  G.onBridgeDone=function(){ G.onStageCleared(4); if(G.demo){ toTitle(); return; } if(G.bot||Q.get('nos5')==='1'){ finish(true); return; } toStage5(runOut()); }; // on to stage 5 SUNFALL (its own page)
+  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); rank=pts>7000?'S':pts>5800?'A':pts>4400?'B':pts>2800?'C':'D'; // C3 scale (stages 1-4 + SUNFALL): average clean clear ~5.4 M -> pts ~6500 (A), novice ~3.1 M with 2 continues (C)
     if(G.demo){ toTitle(); return; }
     if(cleared) exUnlock('inf'); else exUnlock('slow'); if(eoN>=4) exUnlock('tiny');
-    lastResult={score,pct,eoN,cont:G.contUsed||0,cleared,rank,attack:G.attack,ex:G.exUsed}; G.mode='results'; screen='results'; scrT=0; A.music(cleared?'credits':null); }
+    lastResult={score,pct,eoN,cont:G.contUsed||0,cleared,rank,attack:G.attack,ex:G.exUsed,s5:G.s5||0,s5stars:G.s5stars||0}; G.mode='results'; screen='results'; scrT=0; A.music(cleared?'credits':null); }
   function qualifies(s){ return !lastResult.ex && s>RANK[RANK.length-1].s; }
   function startEntry(){ entry={c:[0,0,0],i:0}; screen='entry'; scrT=0; }
-  function finishEntry(){ const n=entry.c.map(i=>ALPH[i]).join(''); RANK.push({n,s:lastResult.score,g:lastResult.rank,a:lastResult.attack?1:0,me:1}); RANK.sort((a,b)=>b.s-a.s); RANK=RANK.slice(0,10); store.set('vcx_rank2',RANK.map(r=>({n:r.n,s:r.s,g:r.g,a:r.a}))); go('ranking'); }
+  function finishEntry(){ const n=entry.c.map(i=>ALPH[i]).join(''); RANK.push({n,s:lastResult.score,g:lastResult.rank,a:lastResult.attack?1:0,me:1}); RANK.sort((a,b)=>b.s-a.s); RANK=RANK.slice(0,10); store.set('vcx_rank3',RANK.map(r=>({n:r.n,s:r.s,g:r.g,a:r.a}))); go('ranking'); }
   /* ---------------- ending ---------------- */
+  // the ending after stage 5 SUNFALL: radio lines over a dawn flight home, then the credits roll, then the whole-run results
   function startEnding(){
     const trueEnd=G.eo.every(v=>v===true);
     G.mode='play'; screen='ending'; scrT=0; A.music('credits');
     const L=[
-      ['VEGA','Seven... it\'s over. The eye is dark.'],
-      ['VEGA','Every drone in the sky just dropped out of formation. They\'re landing. All of them.'],
-      ['SEVEN','Then bring them down gently. People live under those.'],
+      ['VEGA','The IRON SUN is gone, Seven. The SUNLANCE never fired.'],
+      ['JUNO','Neo City\'s lights are coming back on. I can see the coast from here.'],
+      ['BRICK','Still smoking. Still flying. Still shooting.'],
+      ['MARSHAL','Hauler\'s doors are open. Bring them home, Vector squadron.'],
     ];
-    if(trueEnd) L.push(['VEGA','The relays, the tankers, the boats, the lights - you didn\'t leave it a single place to hide.'],['VEGA','The network\'s clean. Halcyon isn\'t sleeping, Seven. It\'s gone.'],['SEVEN','Good. Now let\'s go see what the city looks like with the lights on.'],['VEGA','Officer Seven. Come home.']);
-    else L.push(['VEGA','Seven... one of the relays is still pinging. Somewhere out there.'],['SEVEN','Let it ping. Tomorrow we go and find it.'],['HALCYON','...']);
+    if(trueEnd) L.push(['VEGA','The boats, the tankers, the lights, the relays - you didn\'t leave HALCYON a single place to hide.'],['SEVEN','Then let\'s go see what the city looks like with the lights on.'],['VEGA','Officer Seven. Come home.']);
+    else L.push(['VEGA','One relay down there is still pinging, Seven.'],['SEVEN','Let it ping. Tomorrow we go and find it.'],['HALCYON','...']);
     ending={L,i:0,t:0,trueEnd,skip:false};
-    G.setEnv(trueEnd?VC.ENV.coast:VC.ENV.tower,false); G.clearAll(); G.ph='ending';
+    G.setEnv(VC.ENV.coast,false); G.clearAll(); G.ph='ending'; G.player.visible=true; G.P.dead=false; G.P.y=40; G.wingSpawn&&G.wingSpawn();
   }
+  const CREDITS=[['VECTOR CLIMAX STRIKE',''],['WARRANT-7','SEVEN'],['HANDLER','VEGA'],['VECTOR 2','JUNO'],['VECTOR 3','BRICK'],['HAULER','MARSHAL'],['THE VOICE IN EVERY LIGHT','HALCYON'],['HALCYON ACE','SPECTRE'],['MUSIC','THE VECTOR BLAZE SOUNDTRACK'],['','A  VECTOR  BLAZE  STORY']];
   function endingTick(dt){ const e=ending; e.t+=dt; const P=G.P; P.climaxT=0; P.locks=[];
     // free flight, autopilot to the dawn
-    const t=G.t; G.inp.x=Math.sin(t*0.3)*0.4; G.inp.y=(34-P.y)/30;
-    if(e.skip||e.t>e.L.length*4.2+8){ finish(true); } }
+    const t=G.t; G.inp.x=Math.max(-0.5,Math.min(0.5,Math.sin(t*0.3)*0.22-G.P.x/60)); G.inp.y=(34-P.y)/30;
+    if(e.skip||e.t>e.L.length*3.4+17){ finish(true); } }
   /* ---------------- main loop ---------------- */
   let last=performance.now();
   function frame(now){
@@ -242,9 +262,15 @@
     if(screen!=='play'||G.paused){ if(G.inp.navY>0) menuKey('up'); if(G.inp.navY<0) menuKey('down'); if(G.inp.navX<0) menuKey('left'); if(G.inp.navX>0) menuKey('right'); if(G.inp.misP||(G.inp.okP&&screen!=='play')) menuKey('ok'); if(G.inp.backP&&(screen!=='play'||!G.inp.startP)) menuKey('back'); }
     if(screen==='play'&&!G.paused&&G.inp.startP&&G.ph!=='ending'&&G.mode==='play') setPause(true); else if(screen==='play'&&G.paused&&G.inp.startP) setPause(false);
     if(screen==='ending'){ endingTick(dt); if(G.inp.misP) menuKey('ok'); }
-    if(!G.paused){ let left=dt, n=0; while(left>1e-4&&n<8){ const st=Math.min(1/30,left); G.update(st); left-=st; n++; } }
+    if(!G.paused&&!window.__vcx.freeze){ let left=dt, n=0; while(left>1e-4&&n<8){ const st=Math.min(1/30,left); G.update(st); left-=st; n++; } }
+    // head tracking: the camera runs while a mode is on and you are flying (or the HEAD TRACKING panel is open); the view effects
+    // are applied for the render + HUD only, then the nominal camera comes back for the game logic
+    const flyingNow=screen==='play'&&!G.paused&&G.mode==='play', inHead=screen==='head';
+    HEAD.want(flyingNow,inHead); HEAD.uiMode(inHead?'menu':flyingNow?'play':'off'); HEAD.update(dt/FAST);
+    const useCam=flyingNow||inHead; if(useCam){ const pp=G.player&&G.player.position; HEAD.applyCam(E.camera,pp?E.camera.position.distanceTo(pp):22); }
     E.renderer.render(E.scene,E.camera);
     H.draw(); overlay(dt);
+    if(useCam) HEAD.restoreCam(E.camera);
   }
   /* ---------------- overlay screens (drawn on the HUD canvas) ---------------- */
   const ui0=document.getElementById('touch');
@@ -254,12 +280,19 @@
     if(TT&&touch.thrK&&G.P){ const K=G.K, v=(G.P.thr-K.thrMin)/(K.thrMax-K.thrMin); if(touch.thr==null) touch.thrV=v; const hh=touch.thrEl.clientHeight; touch.thrK.style.bottom=(4+v*(hh-36))+'px'; touch.thrN.style.bottom=(18+((1-K.thrMin)/(K.thrMax-K.thrMin))*(hh-36))+'px'; }
     const ui=document.getElementById('touch'); const md=(screen==='play'&&!G.paused&&G.mode==='play')?(['branch','continue','dead','gameover','ending','clear','orbit'].includes(G.ph)?'wait':'play'):'menu'; if(ui.dataset.mode!==md) ui.dataset.mode=md; if(TT&&G.P){ const cb=ui.querySelector('[data-b="clx"]'); const rd=G.P.climax>=1||G.P.climaxT>0; if(cb.classList.contains('ready')!==rd) cb.classList.toggle('ready',rd); }
     const logo=(y,s)=>{ x.save(); x.font=(86*sc*s|0)+'px '+F.disp; x.textAlign='center'; x.textBaseline='middle'; x.shadowColor=C.pink; x.shadowBlur=24*sc; x.fillStyle='#fff'; x.fillText('VECTOR',W/2,y); x.shadowColor=C.cyan; x.fillStyle=C.pink; x.font=(108*sc*s|0)+'px '+F.disp; x.fillText('CLIMAX',W/2,y+90*sc*s); x.shadowColor=C.pink; x.fillStyle=C.cyan; x.font=(58*sc*s|0)+'px '+F.disp; x.fillText('S T R I K E',W/2,y+164*sc*s); x.restore(); txt('A  VECTOR  BLAZE  STORY',W/2,y+210*sc*s,15,C.yel,'center'); };
+    if(screen==='boot'&&PEND&&!PEND.single){ x.fillStyle='rgba(0,0,0,.6)'; x.fillRect(0,0,W,Hh); st(PEND.kind==='ending'?'SUNFALL COMPLETE':'GAME OVER',W/2,Hh*0.36,44,PEND.kind==='ending'?C.cyan:C.red); txt('RUN SCORE  '+H.pad(PEND.score||0,9),W/2,Hh*0.46,18,'#fff','center',F.disp); if((scrT*2|0)%2===0) st(TT?'TAP TO CONTINUE':'PRESS START',W/2,Hh*0.66,28,'#fff'); return; }
     if(screen==='boot'){ x.fillStyle='rgba(0,0,0,.55)'; x.fillRect(0,0,W,Hh); logo(Hh*0.28,1); if((scrT*2|0)%2===0) st(TT?'TAP TO START':'PRESS START',W/2,Hh*0.72,30,'#fff'); txt(TT?'best played with the phone sideways':'keyboard / gamepad / touch',W/2,Hh*0.8,13,C.dim,'center'); return; }
     if(screen==='title'){ const g=x.createLinearGradient(0,0,0,Hh); g.addColorStop(0,'rgba(0,0,0,.45)'); g.addColorStop(0.55,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.6)'); x.fillStyle=g; x.fillRect(0,0,W,Hh); logo(Hh*0.17,0.8);
       // touch: rows are at least 44 px tall; on short screens the six items go in two columns of three
-      const rh=TT?Math.max(44,Math.min(38*sc,Hh*0.065)):Math.min(38*sc,Hh*0.065), two=TT&&Hh*0.57+6*rh>Hh-30, cw=two?Math.min(300*sc,W*0.38):340*sc;
-      menus.title.forEach((m,i)=>{ const col=two?(i<3?-1:1):0, r=two?i%3:i, cx=W/2+col*(cw/2+8), y=Hh*0.57+r*rh, on=i===sel; hit(cx-cw/2,y-rh/2,cw,rh,()=>{ sel=i; menuKey('ok'); }); if(on){ x.fillStyle='rgba(255,79,216,.25)'; x.fillRect(cx-cw/2+10*sc,y-rh/2+3,cw-20*sc,rh-6); } st(m,cx,y,on?26:22,on?'#fff':'rgba(255,255,255,.65)'); });
-      const top=RANK[0]; txt('TOP  '+top.n+'  '+H.pad(top.s,9),W/2,Hh*0.57-Math.min(34*sc,Hh*0.06)-8*sc,14,C.yel,'center'); txt(TT?'tap to choose':'Z/J or A: select    arrows / stick: move',W/2,Hh-24*sc,12,C.dim,'center'); return; }
+      const NI=menus.title.length, half=Math.ceil(NI/2), rh=TT?Math.max(44,Math.min(36*sc,Hh*0.056)):Math.min(34*sc,Hh*0.052), two=Hh*0.52+NI*rh>Hh-30, cw=two?Math.min(300*sc,W*0.38):340*sc, y0m=two?Math.max(Hh*0.52,Hh-30-half*rh):Hh*0.52;
+      menus.title.forEach((m,i)=>{ const col=two?(i<half?-1:1):0, r=two?i%half:i, cx=W/2+col*(cw/2+8), y=y0m+r*rh, on=i===sel; hit(cx-cw/2,y-rh/2,cw,rh,()=>{ sel=i; menuKey('ok'); }); if(on){ x.fillStyle='rgba(255,79,216,.25)'; x.fillRect(cx-cw/2+10*sc,y-rh/2+3,cw-20*sc,rh-6); } st(m,cx,y,on?26:22,on?'#fff':'rgba(255,255,255,.65)'); });
+      const top=RANK[0]; txt('TOP  '+top.n+'  '+H.pad(top.s,9),W/2,y0m-rh*0.5-10*sc,14,C.yel,'center'); txt(TT?'tap to choose':'Z/J or A: select    arrows / stick: move',W/2,Hh-24*sc,12,C.dim,'center'); return; }
+    if(VC.FB&&VC.FB.toastT>0){ VC.FB.toastT-=dt; st(VC.FB.toast,W/2,Hh*0.86,18,C.yel); }
+    if(screen==='stages'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('STAGE SELECT',W/2,Hh*0.1,34,C.pink); txt('Cleared stages and the next one are open',W/2,Hh*0.17,13,C.dim,'center');
+      const NAMES=['NEON COAST','FOUNDRY CANYON','SKY DOCKS','THE TOWER','SUNFALL'], rh=Math.max(TT?44:0,Math.min(Hh*0.12,56*sc));
+      for(let i=0;i<=5;i++){ const y=Hh*0.27+i*rh, on=i===sel, open=i===5||i===0||CLEARED>=i; hit(W*0.2,y-rh/2,W*0.6,rh,()=>{ sel=i; menuKey('ok'); }); if(on){ x.fillStyle='rgba(255,79,216,.2)'; x.fillRect(W*0.2,y-rh/2+3,W*0.6,rh-6); }
+        if(i===5){ st('BACK',W/2,y,on?24:20,on?'#fff':C.dim); continue; } txt('STAGE '+(i+1),W*0.24,y,16,open?C.cyan:'rgba(255,255,255,.3)','left',F.disp); txt(open?NAMES[i]:'? ? ? ? ?',W*0.76,y,open?20:16,open?(on?'#fff':'#dfe6ff'):'rgba(255,255,255,.3)','right',F.disp); }
+      return; }
     if(screen==='howto'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('HOW TO PLAY',W/2,Hh*0.09,34,C.pink);
       const rows=TT?[['STEER','Put a thumb anywhere on the left side and drag - the stick follows your thumb'],['VULCAN','Hold GUN (or hold the empty right side)'],['LOCK-ON','Sweep the sight over enemies - each red box is one missile'],['MISSILES','MISSILE button - fires at every lock'],['CLIMAX','CLIMAX button when the gauge is full: time slows, 40 locks. Tap again to unleash'],['ROLL','ROLL button: dodges missiles and shots'],['THROTTLE','BOOST (by your right thumb): full throttle for 3 s - catch runners, beat closing doors. BRAKE: let chasers overshoot. Then you cruise again'],['PAUSE','II button, top right'],['ARMOR','Clearing a stage repairs 30%'],['EMERGENCY ORDERS','One per stage. Complete all four for the true ending'],['ROUTES','After stage 2, tap the LOW or HIGH side']]:[['MOVE','Arrows (or A / D) / left stick / touch stick'],['VULCAN','Hold X / K / pad X or RB'],['LOCK-ON','Sweep the sight over enemies - each red box is one missile'],['MISSILES','Z / J / Enter / pad A - fires at every lock'],['CLIMAX','C / L / pad Y when the gauge is full: time slows, the sight grows, 40 locks, infinite missiles. Press again (or wait) to unleash'],['BARREL ROLL','Space / Q / pad B or LB / double-tap left-right: dodges missiles and shots'],['THROTTLE','W / S move the lever (it stays put), W W or Shift = full. Pad RT / LT or right stick. ACCELERATE and BRAKE prompts tell you when'],['PAUSE','Esc / P / Start'],['ARMOR','Missiles, flak, rams and buildings chip it away. Clearing a stage repairs 30%'],['EMERGENCY ORDERS','One per stage. Complete all four for the true ending'],['ROUTES','After stage 2 you choose the LOW or HIGH route']];
       rows.forEach((r,i)=>{ const y=Hh*0.18+i*Hh*0.066; txt(r[0],W*0.12,y,15,C.cyan,'left',F.disp); wrapAt(x,r[1],W*0.34,y,W*0.56,14); });
@@ -275,22 +308,41 @@
         txt(un?e.name:'? ? ? ? ?',x0+10*sc,y,two?14:16,un?(on?'#fff':'#dfe6ff'):'rgba(255,255,255,.35)','left',F.disp); txt(un?(e.vals?e.vals[EXS.on[e.id]|0]:(EXS.on[e.id]?'ON':'OFF')):e.hint,x1-10*sc,y,un?(two?13:15):(two?10:12),un?(EXS.on[e.id]||e.vals?C.yel:C.dim):'rgba(255,255,255,.45)','right'); });
       const by=two?Hh*0.25+4*rowH+6:Hh*0.25+EXL.length*rowH; hit(W*0.3,by-rowH/2,W*0.4,rowH,()=>{ sel=EXL.length; menuKey('ok'); }); st('BACK',W/2,by,sel===EXL.length?24:20,sel===EXL.length?'#fff':C.dim); return; }
     if(screen==='options'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('OPTIONS',W/2,Hh*0.12,34,C.pink);
-      const val=[OPT.autoFire?'AUTO FIRE':'HOLD BUTTON',OPT.autoMissile?'AUTO FIRE':'BUTTON',OPT.invert?'INVERTED (UP = DIVE)':'NORMAL (UP = CLIMB)',OPT.pixel?'ON':'OFF',OPT.shake?'ON':'OFF','■'.repeat(OPT.music)+'□'.repeat(10-OPT.music),'■'.repeat(OPT.sfx)+'□'.repeat(10-OPT.sfx),''];
-      const two=TT&&Hh*0.075<44, orh=two?46:Math.max(TT?44:0,Hh*0.075);
-      menus.options.forEach((m,i)=>{ let y=Hh*0.26+i*orh, x0=W*0.18, x1=W*0.82; if(two){ const c=i<4?0:1; y=Hh*0.25+(i%4)*orh; x0=c?W*0.51:W*0.03; x1=c?W*0.97:W*0.49; } const on=i===sel, xm=(x0+x1)/2;
-        hit(x0,y-orh/2,x1-x0,orh,(X)=>{ sel=i; if(i===5||i===6) menuKey(X<xm?'left':'right'); else menuKey('ok'); }); if(on){ x.fillStyle='rgba(64,240,255,.18)'; x.fillRect(x0,y-orh/2+3,x1-x0,orh-6); } txt(m,x0+12*sc,y,two?15:17,on?'#fff':C.dim,'left',F.disp); txt(two&&i===2?(OPT.invert?'INVERTED':'NORMAL'):val[i],x1-12*sc,y,two?13:15,on?C.yel:'#fff','right'); });
+      const val=[OPT.autoFire?'AUTO FIRE':'HOLD BUTTON',OPT.autoMissile?'AUTO FIRE':'BUTTON',OPT.invert?'INVERTED (UP = DIVE)':'NORMAL (UP = CLIMB)',OPT.pixel?'ON':'OFF',OPT.shake?'ON':'OFF',OPT.flash?'FULL':'REDUCED',['SMALL','MEDIUM','LARGE'][OPT.touchSize|0],'■'.repeat(OPT.music)+'□'.repeat(10-OPT.music),'■'.repeat(OPT.sfx)+'□'.repeat(10-OPT.sfx),!HEAD.usable()?'APP LINK ONLY':[HEAD.S.win&&'WINDOW',HEAD.S.look&&'LOOK',HEAD.S.steer&&'STEER'].filter(Boolean).join(' + ')||'OFF',''];
+      const NO=menus.options.length, half=Math.ceil(NO/2), two=(TT&&Hh*0.062<44)||Hh*0.22+NO*Hh*0.062>Hh*0.92, orh=two?Math.max(TT?44:34,Math.min(46,(Hh*0.7)/half)):Math.max(TT?44:0,Hh*0.062);
+      menus.options.forEach((m,i)=>{ let y=Hh*0.22+i*orh, x0=W*0.18, x1=W*0.82; if(two){ const c=i<half?0:1; y=Hh*0.22+(i%half)*orh; x0=c?W*0.51:W*0.03; x1=c?W*0.97:W*0.49; } const on=i===sel, xm=(x0+x1)/2;
+        hit(x0,y-orh/2,x1-x0,orh,(X)=>{ sel=i; if(i===7||i===8) menuKey(X<xm?'left':'right'); else menuKey('ok'); }); if(on){ x.fillStyle='rgba(64,240,255,.18)'; x.fillRect(x0,y-orh/2+3,x1-x0,orh-6); } txt(m,x0+12*sc,y,two?15:17,on?'#fff':C.dim,'left',F.disp); txt(two&&i===2?(OPT.invert?'INVERTED':'NORMAL'):val[i],x1-12*sc,y,two?13:15,on?C.yel:'#fff','right'); });
       txt(TT?'tap to change - left / right half for volume':'left / right to change',W/2,Hh*0.93,13,C.dim,'center'); return; }
+    if(screen==='head'){ x.fillStyle='rgba(2,4,12,.66)'; x.fillRect(0,0,W,Hh); st('HEAD TRACKING',W/2,Hh*0.08,30,C.pink);
+      const IT=HEAD.ITEMS, n=IT.length+1, noapp=!HEAD.usable(), land=W>Hh*1.2, half=Math.ceil(n/2), right=land?W-196:W*0.97;
+      const stc=noapp||HEAD.state.err?C.red:HEAD.tracking?'#5dff7a':HEAD.lost?C.yel:C.cyan; txt(HEAD.statusText(),W/2,Hh*0.155,13,stc,'center');
+      const y0=land?Hh*0.25:Hh*0.21, rh=land?Math.max(TT?42:32,Math.min(44,(Hh*0.55)/half)):Math.max(TT?44:30,Math.min(52,(Hh*0.5)/n));
+      IT.concat([{name:'BACK',kind:'back'}]).forEach((it,i)=>{ let y=y0+i*rh, x0=W*0.03, x1=right; if(land){ const c=i<half?0:1, cw=(right-W*0.03)/2; y=y0+(i%half)*rh; x0=W*0.03+c*cw+(c?4:0); x1=x0+cw-4; }
+        const on=i===sel, xm=(x0+x1)/2, dim=noapp&&it.id!=='prev'&&it.kind!=='back';
+        hit(x0,y-rh/2,x1-x0,rh,(X)=>{ sel=i; if(it.kind==='num') menuKey(X<xm?'left':'right'); else menuKey('ok'); });
+        if(on){ x.fillStyle='rgba(64,240,255,.18)'; x.fillRect(x0,y-rh/2+3,x1-x0,rh-6); }
+        if(it.kind==='back'){ txt('BACK',x0+10*sc,y,land?14:16,on?'#fff':C.dim,'left',F.disp); return; }
+        txt(it.name,x0+10*sc,y,land?13:15,dim?'rgba(255,255,255,.3)':on?'#fff':C.dim,'left',F.disp);
+        const v=HEAD.valText(it); txt(dim?'-':v,x1-10*sc,y,land?12:14,dim?'rgba(255,255,255,.3)':it.kind==='tog'&&HEAD.S[it.id]?C.yel:on?C.yel:'#fff','right'); });
+      const it=IT[sel]; const hy=land?y0+half*rh+4*sc:y0+n*rh+10*sc;
+      if(headMsgT>0){ headMsgT-=dt; }
+      if(noapp){ x.globalAlpha=0.95; wrapAt(x,(headMsgT>0?'Not here: ':'')+'The camera is blocked inside this page. Open the game\'s app link (the GitHub Pages copy) on your phone to use head tracking. Everything else plays the same here.',W*0.04,hy,right-W*0.06,13); x.globalAlpha=1; }
+      else if(it){ x.globalAlpha=0.9; wrapAt(x,(headMsgT>0&&it.kind==='act'?'Turn a mode on first. ':'')+it.help,W*0.04,hy,right-W*0.06,13); x.globalAlpha=1; }
+      else txt(TT?'tap a row to change it':'left / right to change, OK to toggle',W*0.04,hy,13,C.dim,'left');
+      return; }
     if(screen==='ranking'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('RANKING',W/2,Hh*0.1,36,C.pink);
       RANK.forEach((r,i)=>{ const y=Hh*0.2+i*Hh*0.066; const c=r.me?C.yel:'#fff'; txt(String(i+1).padStart(2,' ')+(i===0?'ST':i===1?'ND':i===2?'RD':'TH'),W*0.26,y,16,C.cyan,'left',F.disp); txt(r.n,W*0.38,y,20,c,'left',F.disp); txt(H.pad(r.s,9),W*0.62,y,20,c,'right',F.disp); txt(r.g,W*0.7,y,20,r.g==='S'?C.pink:C.yel,'left',F.disp); if(r.a) txt('SA',W*0.75,y,12,C.dim,'left'); });
       for(const r of RANK) delete r.me; txt('press any button',W/2,Hh*0.94,13,C.dim,'center'); return; }
     if(screen==='play'&&G.paused){ const np=menus.pause.length, rh=TT?Math.max(44,Math.min(40*sc,(Hh-70)/np)):40*sc, pw=Math.min(W-24,440*sc), y0=Math.max(58,Hh*0.5-rh*np/2+22*sc), top0=Math.max(4,y0-Math.min(86*sc,y0-4)); H.menuPanel(W/2,top0,pw,(y0-top0)+rh*np+10*sc);
       st('PAUSE',W/2,top0+(y0-top0)*0.5,Math.min(44,(y0-top0)*0.7/sc),'#fff'); menus.pause.forEach((m,i)=>{ const y=y0+i*rh+rh/2, on=i===sel; hit(W/2-pw/2,y-rh/2,pw,rh,()=>{ sel=i; menuKey('ok'); }); if(on){ x.fillStyle='rgba(255,210,58,.14)'; x.fillRect(W/2-pw/2+8*sc,y-rh/2+3,pw-16*sc,rh-6); } st(m,W/2,y,on?24:20,on?C.yel:'rgba(255,255,255,.75)'); }); return; }
     if(screen==='ending'&&ending){ const e=ending; x.fillStyle='rgba(0,0,0,'+Math.min(0.35,e.t*0.1)+')'; x.fillRect(0,0,W,Hh);
-      const i=Math.min(e.L.length-1,Math.floor(e.t/4.2)); const line=e.L[i]; if(e.t<e.L.length*4.2){ const k=(e.t%4.2); x.globalAlpha=Math.min(1,k/0.4)*Math.min(1,(4.2-k)/0.4); H.panel(W*0.14,Hh*0.74,W*0.72,Hh*0.13,line[0]==='HALCYON'?C.red:line[0]==='SEVEN'?C.yel:'#c08cff','rgba(6,4,16,.82)'); txt(line[0],W*0.16,Hh*0.77,14,line[0]==='HALCYON'?C.red:line[0]==='SEVEN'?C.yel:'#c08cff'); wrapAt(x,line[1],W*0.16,Hh*0.815,W*0.68,17); x.globalAlpha=1; }
-      else { const k=e.t-e.L.length*4.2; x.globalAlpha=Math.min(1,k/1); logo(Hh*0.2,0.8); st(e.trueEnd?'TRUE ENDING':'MISSION COMPLETE',W/2,Hh*0.62,30,e.trueEnd?C.yel:'#fff'); if(!e.trueEnd) txt('Clear all four Emergency Orders to see the true ending',W/2,Hh*0.68,14,C.dim,'center'); x.globalAlpha=1; }
+      const i=Math.min(e.L.length-1,Math.floor(e.t/3.4)); const line=e.L[i]; if(e.t<e.L.length*3.4){ const k=(e.t%3.4); x.globalAlpha=Math.min(1,k/0.4)*Math.min(1,(3.4-k)/0.4); H.panel(W*0.14,Hh*0.74,W*0.72,Hh*0.13,line[0]==='HALCYON'?C.red:line[0]==='SEVEN'?C.yel:'#c08cff','rgba(6,4,16,.82)'); txt(line[0],W*0.16,Hh*0.77,14,line[0]==='HALCYON'?C.red:line[0]==='SEVEN'?C.yel:'#c08cff'); wrapAt(x,line[1],W*0.16,Hh*0.815,W*0.68,17); x.globalAlpha=1; }
+      else if(e.t<e.L.length*3.4+11){ const k=e.t-e.L.length*3.4; x.fillStyle='rgba(2,4,12,'+Math.min(0.55,k*0.3)+')'; x.fillRect(0,0,W,Hh); const y0=Hh*1.05-k*Hh*0.16;
+        CREDITS.forEach((c,i)=>{ const y=y0+i*Hh*0.12; if(y<-20||y>Hh+20) return; if(c[0]) txt(c[0],W/2,y-11*sc,i===0?22:13,i===0?C.pink:C.cyan,'center',i===0?F.disp:F.mono,'#000'); if(c[1]) st(c[1],W/2,y+10*sc,i===CREDITS.length-1?16:24,'#fff'); }); }
+      else { const k=e.t-e.L.length*3.4-11; x.globalAlpha=Math.min(1,k/1); logo(Hh*0.2,0.8); st(e.trueEnd?'TRUE ENDING':'MISSION COMPLETE',W/2,Hh*0.62,30,e.trueEnd?C.yel:'#fff'); if(!e.trueEnd) txt('Clear all four Emergency Orders to see the true ending',W/2,Hh*0.68,14,C.dim,'center'); x.globalAlpha=1; }
       return; }
     if(screen==='results'&&lastResult){ const R=lastResult; x.fillStyle='rgba(2,4,12,.82)'; x.fillRect(0,0,W,Hh); st(R.cleared?'ALL STAGES CLEAR':'GAME OVER',W/2,Hh*0.13,40,R.cleared?C.cyan:C.red);
-      const rows=[['TOTAL SCORE',H.pad(R.score,9)],['DESTRUCTION RATE',Math.round(R.pct*100)+'%'],['EMERGENCY ORDERS',R.eoN+' / 4'],['CONTINUES USED',String(R.cont)]];
+      const rows=[['TOTAL SCORE',H.pad(R.score,9)],['DESTRUCTION RATE',Math.round(R.pct*100)+'%'],['EMERGENCY ORDERS',R.eoN+' / 4'],['SUNFALL',R.s5?('★'.repeat(R.s5stars||0)+'☆'.repeat(3-(R.s5stars||0))+'  '+H.pad(R.s5,7)):'-'],['CONTINUES USED',String(R.cont)]];
       if(R.ex) txt('EX OPTIONS USED - NOT RANKED',W/2,Hh*0.2,13,C.yel,'center'); rows.forEach((r,i)=>{ if(scrT<0.4+i*0.4) return; const y=Hh*0.3+i*Hh*0.08; txt(r[0],W*0.28,y,18,C.cyan,'left',F.disp); txt(r[1],W*0.72,y,22,'#fff','right',F.disp); });
       if(scrT>2.2){ st('RANK',W/2,Hh*0.67,24,'#fff'); st(R.rank,W/2,Hh*0.77,80,R.rank==='S'?C.pink:R.rank==='A'?C.yel:'#fff'); }
       if(scrT>3&&(scrT*2|0)%2) txt(TT?'TAP TO CONTINUE':'PRESS MISSILE',W/2,Hh*0.92,14,C.dim,'center'); return; }
@@ -310,6 +362,6 @@
     if(Q.get('auto')==='1'){ A.unlock(); startGame(Q.get('attack')==='1'); }
     requestAnimationFrame(t=>{ last=t; frame(t); });
   }
-  window.__vcx={EXS,exApply,G,E,start:(n,attack)=>{ history.replaceState(null,'','?stage='+n); startGame(!!attack); },state:()=>({screen,mode:G.mode,ph:G.ph,stage:G.stage,st:G.st&&+G.st.toFixed(1),score:G.score,armor:G.P&&G.P.armor,thr:G.P&&+G.P.thr.toFixed(2),thrE:G.P&&+G.P.thrE.toFixed(2),cam:G.camMode,trenchD:G.trench&&Math.round(G.trench.D),ens:G.ENS.length,shots:G.SHOTS.length,eo:G.eo,route:G.route,cont:G.cont,kills:G.kills,spawned:G.spawned,boss:G.boss&&{n:G.boss.n,st:G.boss.st,k:G.bossBar&&G.bossBar.k,dead:G.boss.dead},result:lastResult}),key:menuKey,screen:()=>screen,hits:()=>HITS.map(h=>({x:h.x+h.w/2,y:h.y+h.h/2,w:h.w,h:h.h}))};
+  window.__vcx={EXS,exApply,G,E,hitRects:()=>HITS.map(h=>({x:h.x,y:h.y,w:h.w,h:h.h})),endT:o=>{ if(ending) ending.t=Math.max(0,ending.L.length*3.4+o); },start:(n,attack)=>{ history.replaceState(null,'','?stage='+n); startGame(!!attack); },state:()=>({screen,mode:G.mode,ph:G.ph,stage:G.stage,st:G.st&&+G.st.toFixed(1),score:G.score,armor:G.P&&G.P.armor,thr:G.P&&+G.P.thr.toFixed(2),thrE:G.P&&+G.P.thrE.toFixed(2),cam:G.camMode,trenchD:G.trench&&Math.round(G.trench.D),ens:G.ENS.length,shots:G.SHOTS.length,eo:G.eo,route:G.route,cont:G.cont,kills:G.kills,spawned:G.spawned,boss:G.boss&&{n:G.boss.n,st:G.boss.st,k:G.bossBar&&G.bossBar.k,dead:G.boss.dead},result:lastResult}),key:menuKey,screen:()=>screen,hits:()=>HITS.map(h=>({x:h.x+h.w/2,y:h.y+h.h/2,w:h.w,h:h.h}))};
   boot().catch(e=>{ console.error(e); const l=document.getElementById('load'); l.textContent='Failed to start: '+e.message; });
 })();

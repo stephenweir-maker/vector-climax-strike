@@ -296,7 +296,7 @@
   M.prop.neonWall = function(side, h, L, red){ const r=()=>Math.random(), P=[], sx=v=>v*side, A=red?'#ff2030':'#ff4fd8', B=red?'#ff4fd8':'#40f0ff', BODY='#141628', BODY2='#1c1f36';
     let z=-L/2; while(z<L/2){ const d=Math.min(L/2-z,24+r()*30), hh=h*(0.95+r()*0.5), inset=r()*3; const zc=z+d/2;
       P.push({t:'box',w:16,h:hh,d:d-1,p:[sx(8+inset),hh/2,zc],c:r()<0.5?BODY:BODY2});
-      for(let y=10;y<hh-6;y+=7+r()*5){ if(r()<0.55) P.push({t:'box',w:0.4,h:1.4,d:d*0.7,p:[sx(inset-0.15),y,zc],c:r()<0.75?'#ffd8a0':'#a0c8ff',glow:1}); }
+      for(let y=10;y<hh-6;y+=7+r()*5){ if(r()<0.38) P.push({t:'box',w:0.4,h:1.4,d:d*0.7,p:[sx(inset-0.15),y,zc],c:r()<0.75?'#ffd8a0':'#a0c8ff',glow:1}); }
       if(r()<0.7) P.push({t:'box',w:0.5,h:hh*0.7,d:0.6,p:[sx(inset-0.3),hh*0.4,zc-d/2+1],c:r()<0.5?A:B,glow:1});
       if(r()<0.45){ const y=h*(0.3+r()*0.4), sw=8+r()*10; P.push({t:'box',w:sw,h:5+r()*4,d:0.8,p:[sx(inset-sw/2-0.5),y,zc],c:'#0a0a14'}); P.push({t:'box',w:sw-1.5,h:3.5,d:1,p:[sx(inset-sw/2-0.5),y,zc-0.2],c:r()<0.5?A:B,glow:1}); }
       P.push({t:'box',w:16.4,h:0.5,d:d-1,p:[sx(8+inset),hh,zc],c:r()<0.5?A:B,glow:1});

@@ -33,7 +33,7 @@
     chase: {back:29, up:5.8, pitch:0.085, offX:5,   offY:1.2, lagX:16, lagY:24, fov:3, rollK:0.12},
     trench:{back:27, up:5.0, pitch:0.07,  offX:3,   offY:0.6, lagX:18, lagY:22, fov:5, rollK:0.10},
     deck:  {back:21, up:4.2, pitch:0.05,  offX:0,   offY:0,   lagX:20, lagY:20, fov:-2, rollK:0},
-    skyward:{back:32, up:2.0, pitch:-0.12, offX:0,   offY:0,   lagX:10, lagY:10, fov:6,  rollK:0}   // story bridge: looking up at the IRON SUN
+    skyward:{back:23, up:2.6, pitch:-0.12, offX:0,   offY:0,   lagX:10, lagY:10, fov:6,  rollK:0}   // story bridge: looking up at the IRON SUN
   };
   G.camMode='abc'; const CV=Object.assign({},CAM.abc), CVt=Object.assign({},CAM.abc); G.CV=CV;
   G.camSnap=function(m){ G.camMode=m||G.camMode; Object.assign(CV,CAM[G.camMode]); Object.assign(CVt,CAM[G.camMode]); };
@@ -296,6 +296,7 @@
   function hurtPlayer(n,why,x,y,z){
     const P=G.P; if(P.dead||P.inv>0||G.god) return false;
     if(P.rollT>0&&why!=='crash'){ G.pops.push({x:P.x,y:P.y+6,z:-10,t:0,txt:'DODGE',c:'#40f0ff'}); addScore(300); return false; }
+    (G._hurtLog=G._hurtLog||[]).push({t:G.t,why}); if(G._hurtLog.length>10) G._hurtLog.shift();
     if(G.ex&&G.ex.armor) n*=0.5; G.stDmg=(G.stDmg||0)+n; P.armor=Math.max(0,P.armor-n); P.inv=K.inv; P.hurtT=0.25; P.dmgTaken+=n; G.shake=Math.max(G.shake||0,why==='crash'?14:8); G.flashR=0.35; A.sfx.hurt();
     boom(P.x+rnd(-2,2),P.y,0,2.5,COL.red); if(G.tel) G.tel('hurt',why,n,x,y,z);
     // Battle Pod hit feedback: a diagonal arrow on screen pointing at where the hit came from, DANGER, a red edge flash, rumble

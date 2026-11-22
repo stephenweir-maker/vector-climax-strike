@@ -195,7 +195,7 @@
         at(3150,()=>{ S.column(5,{x:0,y:44}); }),
         at(3950,()=>{ S.column(4,{x:-6,y:40}); }), at(4350,()=>{ S.vee(3,{x:0,y:52,noFire:1}); }),
         at(3600,()=>{ G.alert('CORE SHUTTERS CLOSING',2.6); G.say('HALCYON','No further, officer. Doors close.',2); G.prompt('accel',{reward:0,label:'FULL THROTTLE'}); }),
-        ob(4700,'door',{close:4.1}),
+        ob(4700,'door',{close:4.6}), /* +0.5 s grace on the core shutters */
         at(4750,()=>{ S.darts(10,{x:0,y:44,spread:20,z:1100}); }),
         ob(4950,'pipes',{xs:[0]}),
       ] }; };
@@ -298,7 +298,7 @@
     if(t>17.2){ G._oc=0; orbitEnd(); } }
   function doContinue(){ const P=G.P; G.cont--; G.contUsed++; G.stCont=(G.stCont||0)+1; G.player.visible=true; if(!G.demo&&G.exUnlock) G.exUnlock('armor'); P.dead=false; P.armor=100; P.inv=3; P.climax=1; P.stock=G.K.misMax; G.ph=G.boss&&!G.boss.dead?'boss':(G.ph_before==='boss'||G.ph_before==='bossWarn'?G.ph_before:'fly'); if(G.ph==='bossWarn') G.phT=0; A.sfx.cont(); G.say('VEGA','Warrant-7 rebooted. Back in it, Seven!',2.4); G._lowSaid=0; G.score=Math.floor(G.score); }
   function stageClear(){
-    const P=G.P; G.ph='clear'; G.phT=0; A.music(null); setTimeout(()=>A.music('win'),200);
+    const P=G.P; G.ph='clear'; G.onStageCleared&&G.onStageCleared(G.stage); G.phT=0; A.music(null); setTimeout(()=>A.music('win'),200);
     if(!G.demo&&G.exUnlock){ G.exUnlock('stock'); setTimeout(()=>G.exUnlock('paint'),3400); if(G.stage>=2) setTimeout(()=>G.exUnlock('gauge'),6800); }
     const pct=G.stSpawned?G.stKills/G.stSpawned:0; const destroyB=Math.round(pct*100)*500, armorB=Math.round(P.armor)*200, speedB=G.speedBonus?G.speedBonus():0;
     // stage rank: how much you shot down, how little you were hit, the order, minus continues

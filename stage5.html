@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Vector Climax Strike</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#020208">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  /* one dark arcade look on purpose: the game screen is the same in either theme */
+  :root{ --bg:#020208; --cyan:#3ee6ff; --pink:#ff3d8a; --amber:#ffb02e; --fg:#ffffff; color-scheme:dark; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
+  canvas{ position:fixed; left:0; top:0; display:block; }
+  #gl{ z-index:1; } #hud{ z-index:2; pointer-events:none; }
+  #load{ position:fixed; inset:0; z-index:9; display:flex; align-items:center; justify-content:center; font:20px 'Share Tech Mono',monospace; color:var(--cyan); background:var(--bg); letter-spacing:.2em; text-align:center; padding:16px; }
+  #touch{ position:fixed; inset:0; z-index:3; display:none; touch-action:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
+  #touch[data-mode="menu"] .tb:not([data-b="pause"]), #touch[data-mode="menu"] #tstick{ display:none; } #touch[data-mode="menu"] .tb[data-b="pause"]{ display:none; }
+  /* floating steering stick: rests bottom-left as a hint, jumps under the thumb */
+  #tstick{ position:absolute; left:calc(26px + env(safe-area-inset-left,0px)); bottom:calc(26px + env(safe-area-inset-bottom,0px)); width:130px; height:130px; border-radius:50%;
+    border:2px solid rgba(62,230,255,.35); background:radial-gradient(circle,rgba(62,230,255,.1),rgba(62,230,255,0) 70%); opacity:.5; pointer-events:none; }
+  #tstick.live{ bottom:auto; opacity:1; border-color:rgba(62,230,255,.75); }
+  #tknob{ position:absolute; left:40px; top:40px; width:50px; height:50px; border-radius:50%; background:rgba(62,230,255,.45); box-shadow:0 0 18px rgba(62,230,255,.6); }
+  .tb{ position:absolute; border-radius:50%; border:2px solid rgba(255,255,255,.5); color:#fff; font:13px 'Black Ops One',sans-serif; letter-spacing:.04em; display:flex; align-items:center; justify-content:center; background:rgba(6,8,18,.3); }
+  .tb.on{ background:rgba(62,230,255,.45); transform:scale(.94); }
+  /* VECTOR CLIMAX STRIKE layout (stage 5 SUNFALL): GUN (hold), MISSILE, CLIMAX, BOOST / BRAKE by the right thumb, pause */
+  .tb[data-b="mis"]{ right:calc(24px + env(safe-area-inset-right,0px)); bottom:calc(30px + env(safe-area-inset-bottom,0px)); width:104px; height:104px; border-color:var(--pink); font-size:14px; background:rgba(60,8,46,.4); }
+  .tb[data-b="fire"]{ right:calc(136px + env(safe-area-inset-right,0px)); bottom:calc(24px + env(safe-area-inset-bottom,0px)); width:80px; height:80px; border-color:#ffd23a; font-size:13px; background:rgba(50,40,4,.3); }
+  .tb[data-b="clx"]{ right:calc(132px + env(safe-area-inset-right,0px)); bottom:calc(114px + env(safe-area-inset-bottom,0px)); width:68px; height:68px; border-color:var(--cyan); font-size:11px; }
+  .tb[data-b="clx"].ready{ background:rgba(62,230,255,.4); box-shadow:0 0 22px rgba(62,230,255,.8); }
+  .tb[data-b="boost"]{ right:calc(26px + env(safe-area-inset-right,0px)); bottom:calc(146px + env(safe-area-inset-bottom,0px)); width:60px; height:60px; font-size:11px; border-color:var(--cyan); }
+  .tb[data-b="brake"]{ right:calc(132px + env(safe-area-inset-right,0px)); bottom:calc(196px + env(safe-area-inset-bottom,0px)); width:54px; height:54px; font-size:11px; border-color:var(--amber); }
+  .tb.cue{ animation:cue .45s ease-in-out infinite alternate; } .tb[data-b="boost"].cue{ background:rgba(62,230,255,.45); box-shadow:0 0 22px rgba(62,230,255,.9); } .tb[data-b="brake"].cue{ background:rgba(255,176,46,.45); box-shadow:0 0 22px rgba(255,176,46,.9); }
+  @keyframes cue{ from{ transform:scale(1); } to{ transform:scale(1.12); } }
+  .tb[data-b="pause"]{ right:calc(14px + env(safe-area-inset-right,0px)); top:calc(64px + env(safe-area-inset-top,0px)); width:44px; height:44px; font-size:12px; }
+  @media (max-height:430px){ #tstick{ width:116px; height:116px; } #tknob{ left:33px; top:33px; } .tb[data-b="mis"]{ width:92px; height:92px; } .tb[data-b="fire"]{ right:calc(124px + env(safe-area-inset-right,0px)); width:74px; height:74px; } .tb[data-b="clx"]{ right:calc(122px + env(safe-area-inset-right,0px)); bottom:calc(104px + env(safe-area-inset-bottom,0px)); width:62px; height:62px; } .tb[data-b="boost"]{ bottom:calc(130px + env(safe-area-inset-bottom,0px)); width:56px; height:56px; } .tb[data-b="brake"]{ right:calc(122px + env(safe-area-inset-right,0px)); bottom:calc(182px + env(safe-area-inset-bottom,0px)); width:50px; height:50px; } }
+  @media (orientation:portrait){ .tb[data-b="pause"]{ top:calc(70px + env(safe-area-inset-top,0px)); } }
+</style>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+<div id="touch" data-mode="menu">
+  <div id="tstick"><div id="tknob"></div></div>
+  <div class="tb" data-b="mis">MISSILE</div>
+  <div class="tb" data-b="fire">GUN</div>
+  <div class="tb" data-b="clx">CLIMAX</div>
+  <div class="tb" data-b="boost">BOOST</div>
+  <div class="tb" data-b="brake">BRAKE</div>
+  <div class="tb" data-b="pause">II</div>
+</div>
+<div id="load">LOADING WARRANT-7...</div>
+<script src="lib/three-s3d.min.js"></script>
+<script src="lib/veh3d-w7j.js"></script>
+<script src="s5/engine.js"></script>
+<script src="s5/audio.js"></script>
+<script src="s5/models.js"></script>
+<script src="s5/route.js"></script>
+<script src="s5/world.js"></script>
+<script src="s5/game.js"></script>
+<script src="s5/enemies.js"></script>
+<script src="s5/mission.js"></script>
+<script src="s5/vcxw.js"></script>
+<script src="s5/hud.js"></script>
+<script src="js/head.js"></script>
+<script src="s5/main.js"></script>
