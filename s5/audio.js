@@ -7,7 +7,9 @@
   A.TRACKS = { brief:'audio/sw-title.mp3', title:'audio/sw-title.mp3', mission:'audio/mus-d2-sky.ogg', trench:'audio/mus-boss.ogg', results:'audio/mus-win.ogg' };
   A.SFXK=0.56; A.MUSK=0.9;
   let pauseK=1, boomK=1;
-  function mVol(el){ return Math.max(0,Math.min(1,A.vol.music*A.MUSK*pauseK*boomK*(el&&el._g||1))); }
+  let voiceK=1; // VEGA's voice ducks the music (js/voice.js)
+  function mVol(el){ return Math.max(0,Math.min(1,A.vol.music*A.MUSK*pauseK*boomK*voiceK*(el&&el._g||1))); }
+  A.voiceDuck=function(k){ voiceK=k; if(A.cur) A.cur.volume=mVol(A.cur); if(A._wg&&A.ctx){ try{ A._wg.gain.setTargetAtTime(A.vol.music*A.MUSK*0.9*k,A.ctx.currentTime,k<1?0.05:0.25); }catch(e){} } };
   A.unlock = function(){
     if(!A.ctx){ try{ const c=A.ctx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
       A.master=c.createGain(); A.master.gain.value=A.vol.sfx*A.SFXK;

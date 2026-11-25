@@ -18,7 +18,9 @@
   A.POSTK=0.8; /* the CLIMAX swell and release bypass that cut, so the release is the loudest moment in the game */
   A.MUSK=1.0;            /* music element level at full slider (songs are -14 LUFS; the sfx bus was turned down to sit beside them) */
   let pauseK=1, boomK=1;
-  function mVol(el){ return Math.max(0,Math.min(1,A.vol.music*A.MUSK*pauseK*boomK*(el&&el._g||1))); }
+  let voiceK=1; // VEGA's voice ducks the music (js/voice.js)
+  function mVol(el){ return Math.max(0,Math.min(1,A.vol.music*A.MUSK*pauseK*boomK*voiceK*(el&&el._g||1))); }
+  A.voiceDuck=function(k){ voiceK=k; if(A.cur) A.cur.volume=mVol(A.cur); if(A._wg&&A.ctx){ try{ A._wg.gain.setTargetAtTime(A.vol.music*A.MUSK*0.9*k,A.ctx.currentTime,k<1?0.05:0.25); }catch(e){} } };
   A.unlock = function(){
     if(!A.ctx){ try{ const c=A.ctx=new (window.AudioContext||window.webkitAudioContext)();
       A.master=c.createGain(); A.master.gain.value=A.vol.sfx*A.SFXK;

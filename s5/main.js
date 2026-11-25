@@ -10,7 +10,7 @@
     try{ location.href='index.html?'+(cleared?'ending=':'over=')+encodeURIComponent(JSON.stringify(out)); }catch(e){ location.href='index.html'; } }
   const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
   const OPT=Object.assign({music:8,sfx:8,voice:8,shake:10,flash:10,invert:false,assist:true,diff:'pilot'},store.get('vcx_s5opt',{}));
-  { const VO=store.get('vcx_opt',{}); if(VO.music!=null) OPT.music=VO.music; if(VO.sfx!=null) OPT.sfx=VO.sfx; if(VO.shake!=null) OPT.shake=VO.shake?10:0; if(VO.invert!=null) OPT.invert=!!VO.invert; if(VO.flash!=null) OPT.flash=VO.flash?10:4; } // the main game's options carry over
+  { const VO=store.get('vcx_opt',{}); if(VO.music!=null) OPT.music=VO.music; if(VO.sfx!=null) OPT.sfx=VO.sfx; if(VO.shake!=null) OPT.shake=VO.shake?10:0; if(VO.invert!=null) OPT.invert=!!VO.invert; if(VO.flash!=null) OPT.flash=VO.flash?10:4; if(window.VOICE){ VOICE.init(A); VOICE.setVol(VO.voice!==false,VO.vvol!=null?VO.vvol/10:0.9); } } // the main game's options carry over
   function applyOpt(){ A.vol.music=OPT.music/10; A.vol.sfx=OPT.sfx/10; A.vol.voice=OPT.voice/10; A.setVol(); G.opt.shake=OPT.shake/10; G.opt.flash=OPT.flash/10; G.opt.assist=OPT.assist; G.opt.invert=OPT.invert; }
   let BOARD=store.get('vs_board1',null)||[['SVN',780000],['VGA',640000],['JNO',520000],['BRK',430000],['MSH',350000],['HLC',280000],['W7 ',210000],['NEO',150000],['SUN',90000],['ZER',40000]].map(r=>({n:r[0],s:r[1]}));
   /* ======================= input ======================= */
@@ -210,6 +210,7 @@
     G.anyInput=false;
     if(scr==='play'&&G.ph==='fly') A.engine(true,(G.P.thrE-1)/0.45);
     IN.touchUI&&IN.touchUI();
+    if(window.VOICE){ const ln=scr==='play'?MS.cur:null; VOICE.sync(ln,ln&&ln.who,ln&&ln.txt,G.paused); }
     // head tracking (js/head.js): camera on while flying, view effects for the render + HUD only
     const flyingNow=scr==='play'&&!G.paused&&G.mode==='play'&&G.ph!=='fail'; HEAD.want(flyingNow,false); HEAD.uiMode(flyingNow?'play':'off'); HEAD.update(dt/FAST);
     if(flyingNow) HEAD.applyCam(E.camera,G.player?E.camera.position.distanceTo(G.player.position):22);
