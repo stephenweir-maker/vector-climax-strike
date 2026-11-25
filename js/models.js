@@ -11,7 +11,7 @@
       try{
         const b=atob(D.model), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
         new T.GLTFLoader().parse(u.buffer,'',g=>{
-          const root=new T.Group(), m=g.scene; m.traverse(o=>{ if(o.isMesh){ o.material.side=T.DoubleSide; if(o.material.map&&T.SRGBColorSpace) o.material.map.colorSpace=T.SRGBColorSpace; o.material.metalness=0.25; o.material.roughness=0.5; } });
+          const root=new T.Group(), m=g.scene; m.traverse(o=>{ if(o.isMesh){ o.material.side=T.DoubleSide; if(o.material.map&&T.SRGBColorSpace) o.material.map.colorSpace=T.SRGBColorSpace; if(!o.material.metalnessMap){ o.material.metalness=0.25; o.material.roughness=0.5; } else if(o.material.emissiveMap&&T.SRGBColorSpace) o.material.emissiveMap.colorSpace=T.SRGBColorSpace; } });
           m.rotation.y=Math.PI; m.scale.setScalar(18); m.position.y=-1.9; root.add(m); res(root);
         },()=>res(M.fallbackW7()));
       }catch(e){ res(M.fallbackW7()); }

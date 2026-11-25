@@ -8,6 +8,8 @@
   const G=VS.G, E=VS.E, A=VS.A, EN=VS.EN, T=THREE;
   const K=G.K; K.strikeFill=1e9; // the TACTICAL STRIKE gauge never fills (dropped in the combined game)
   const C=G.VX={misMax:8, misReload:0.25, misDelay:0.4, dwell:0.16, gap:0.14, sightK:0.07, lockRange:760, clxT:5, clxScale:0.35, clxLocks:40, clxSightK:0.27, misSpeed:760, misDmg:9, clxGain:0.035, clxTrickle:0.008};
+  // FABLE feel pass (as stages 1-4; ?fable=0 = old values): sweep locks, phone sight 1.3x, volley pay by different targets, full rack reloads at once
+  const NF=G.NF=!/[?&]fable=0/.test(location.search); if(NF){ C.misReload=0.18; C.misDelay=0.3; C.sweepDwell=0.08; C.sweepWin=0.55; }
   const MIS=G.MIS=[];
   function fresh(){ return {stock:C.misMax, reload:0, relWait:0, locks:[], acq:null, lockT:0, climax:0, climaxT:0, clxN:0, clxSum:0, popT:0, lastLockT:-9, volleys:0, misKills:0}; }
   G.vcx=fresh();
@@ -29,7 +31,8 @@
       _b.set(side*(60+Math.random()*80),-20+Math.random()*50,0).applyQuaternion(o.quaternion);
       MIS.push({x:_a.x,y:_a.y,z:_a.z,vx:PV.x+_b.x,vy:PV.y+_b.y,vz:PV.z+_b.z,t:-i*(clx?0.02:0.055),e:l.e,clx}); i++; }
     for(const l of V.locks) if(l.e) l.e._lk=0;
-    if(i){ A.sfx.volley&&A.sfx.volley(i); V.volleys++; if(!clx){ V.stock=Math.max(0,V.stock-i); V.relWait=C.misDelay; } if(i>=4&&!clx) G.scoreBonus&&G.scoreBonus(i*300,'x'+i+' MULTI LOCK',null,'#ffd23a'); }
+    if(i){ A.sfx.volley&&A.sfx.volley(i); V.volleys++; if(!clx){ V.stock=Math.max(0,V.stock-i); V.relWait=C.misDelay; } if(NF&&!clx){ const nd=new Set(V.locks.filter(l=>l.e&&!l.e.dead).map(l=>l.e)).size, full=i>=C.misMax, pay=[0,0,500,1500,3000,5000,8000,11000,15000][Math.min(8,nd)]+(full&&nd>=4?5000:0); if(full){ V.stock=C.misMax; V.relWait=0; V.reload=0; } if(pay) G.scoreBonus&&G.scoreBonus(pay,(full?'FULL RACK x':'x')+nd+(full?'':' MULTI LOCK'),null,full?'#ff4fd8':'#ffd23a'); V.multiN=(V.multiN||0)+(nd>=4?1:0); V.fullN=(V.fullN||0)+(full?1:0); }
+      else if(i>=4&&!clx) G.scoreBonus&&G.scoreBonus(i*300,'x'+i+' MULTI LOCK',null,'#ffd23a'); }
     V.locks=[]; V.acq=null; }
   G.vcxTick=function(rdt){ const V=G.vcx, P=G.P, I=G.inp; if(!P||G.mode!=='play') return; const dt=rdt*(G.slowmo||1);
     // missile rack reload
@@ -42,12 +45,13 @@
     if(V.climaxT>0){ V.climaxT-=rdt; if(!canLock()) V.climaxT=Math.min(V.climaxT,0); V.climax=Math.max(0,V.climaxT/C.clxT); if(V.climaxT<=0) endClimax(); }
     // lock-on: a target has to stay inside the sight for a moment (none of that in CLIMAX)
     V.locks=V.locks.filter(l=>!l.e.dead&&l.e.hittable);
-    const clx=V.climaxT>0, R=(clx?C.clxSightK:C.sightK)*Math.min(E.H,E.W*0.6), maxL=clx?C.clxLocks:V.stock, ret=G.ret; V.R=R; V.lockT-=rdt;
+    const sweep=NF&&V.locks.length>0&&G.t-(V.lastLockT||-9)<C.sweepWin;
+    const clx=V.climaxT>0, R=(clx?C.clxSightK:C.sightK*(NF&&Math.min(innerWidth,innerHeight)<=500?1.3:1))*Math.min(E.H,E.W*0.6), maxL=clx?C.clxLocks:V.stock, ret=G.ret; V.R=R; V.lockT-=rdt;
     if(ret&&ret.ok&&canLock()&&V.locks.length<maxL){ let best=null, bd=1e9;
       for(const e of G.ENS){ if(e.dead||!e.hittable||!e.onScreen||e.dz<30||e.dz>(clx?1100:C.lockRange)||e.type==='chunk') continue; if((e._lk||0)>=need(e)) continue;
         const d=Math.hypot(e.sx-ret.x,e.sy-ret.y); if(d<R+(clx?20:0)&&d<bd){ bd=d; best=e; } }
       if(best&&V.acq&&V.acq.e===best) V.acq.t+=rdt; else V.acq=best?{e:best,t:0}:null;
-      if(best&&V.lockT<=0&&(clx||V.acq.t>=C.dwell)){ best._lk=(best._lk||0)+1; V.locks.push({e:best,t:0}); V.lockT=clx?0.02:C.gap; A.sfx.vlock&&A.sfx.vlock(V.locks.length); V.lastLockT=G.t; V.acq=null; } }
+      if(best&&V.lockT<=0&&(clx||V.acq.t>=(sweep?C.sweepDwell:C.dwell))){ best._lk=(best._lk||0)+1; V.locks.push({e:best,t:0}); V.lockT=clx?0.02:(sweep?C.sweepDwell:C.gap); A.sfx.vlock&&A.sfx.vlock(V.locks.length); V.lastLockT=G.t; V.acq=null; } }
     else V.acq=null;
     for(const l of V.locks) l.t+=rdt;
     // missiles: fan out, then home (world space); a missile whose target died flies on and burns out

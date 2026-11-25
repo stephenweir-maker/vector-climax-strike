@@ -70,6 +70,43 @@
     // ---- TORPEDO LOCK -> torpedo -> nova -> MISSION SUCCESS (driven by the lock state machine below)
     ['lock',     {lock:1}]
   ];
+  // FABLE (owner-approved, Nov 26): the finale had nothing on screen to shoot for 28 of its 99 flight seconds. These waves fill those gaps
+  // (same wave kinds as above, no new enemy types); ?fable=0 leaves them out.
+  if(!/[?&]fable=0/.test(location.search)) MS.SCRIPT.push(
+    ['2.6',      {wave:['cross',3,{side:1,d:540,y:12}]}],
+    ['7.4',      {wave:['head',4,{d:940,y:6,spread:18}]}],
+    ['10.4',     {wave:['cross',4,{side:-1,d:560,y:14}]}],
+    ['surf+0.4', {wave:['head',4,{d:900,y:10,spread:16}]}],
+    ['surf+4.8', {wave:['cross',4,{side:-1,d:540,y:10}]}],
+    ['surf+7.6', {wave:['head',3,{d:860,y:6,spread:14}]}],
+    ['tin-0.8',  {wave:['trench',3,{d:420,hd:300}]}],
+    ['tin+1.9',  {wave:['trench',3,{d:400,hd:270}]}],
+    ['tin+4.8',  {wave:['trench',3,{d:420,hd:290}]}],
+    ['tin+8.2',  {wave:['trench',3,{d:420,hd:270}]}],
+    ['tin+11.6', {wave:['trench',3,{d:420,hd:250}]}],
+    ['tin+14.4', {wave:['trench',3,{d:420,hd:280}]}],
+    ['tout-1.4', {wave:['head',3,{d:900,y:10,spread:14}]}],
+    ['tout+3.6', {wave:['head',4,{d:940,y:8,spread:18}]}],
+    ['tout+7.0', {wave:['cross',4,{side:1,d:560,y:16}]}],
+    ['tout+9.6', {wave:['head',3,{d:900,y:4,spread:14}]}],
+    ['tout+12.8',{wave:['cross',4,{side:-1,d:580,y:12}]}],
+    ['tout+15.8',{wave:['head',4,{d:960,y:10,spread:18}]}],
+    ['tout+19.0',{wave:['cross',4,{side:1,d:560,y:8}]}],
+    ['tout+22.6',{wave:['head',4,{d:940,y:14,spread:16}]}],
+    ['tout+25.6',{wave:['cross',4,{side:1,d:560,y:16}]}],
+    ['spire-10.4',{wave:['head',4,{d:940,y:12,spread:18}]}],
+    ['spire-6.4',{wave:['cross',4,{side:-1,d:520,y:24}]}],
+    ['spire+0.6',{wave:['head',4,{d:900,y:6,spread:16}]}],
+    ['spire+2.0',{wave:['cross',4,{side:-1,d:520,y:10}]}],
+    ['spire+5.2',{wave:['head',5,{d:900,y:0,spread:16}]}],
+    ['spire+7.4',{wave:['cross',4,{side:1,d:520,y:6}]}],
+    ['fin-1.2',  {wave:['trench',3,{d:420,hd:300}]}],
+    ['fin+2.0',  {wave:['trench',3,{d:400,hd:270}]}],
+    ['fin+4.6',  {wave:['trench',3,{d:420,hd:290}]}],
+    ['fin+7.4',  {wave:['trench',3,{d:420,hd:260}]}],
+    ['fin+10.2', {wave:['trench',3,{d:400,hd:280}]}],
+    ['fin+12.4', {wave:['trench',3,{d:420,hd:250}]}]
+  );
   // obstacles across the trenches (y0..y1 metres relative to the trench centre line; x0..x1 optional = partial span)
   MS.OBST=[ ['tin+4.2',{y0:-30,y1:-5}], ['tin+6.6',{y0:6,y1:34}], ['tin+8.8',{y0:-30,y1:30,x0:-36,x1:3}], ['tin+11.0',{y0:-30,y1:-4}],
             ['tin+13.0',{y0:5,y1:34}], ['tin+15.0',{y0:-30,y1:30,x0:-3,x1:36}], ['tin+17.0',{y0:-30,y1:-6}],
@@ -341,4 +378,5 @@
     G.onSectionEnd&&G.onSectionEnd(); };
   MS.STARS=[300000,500000,700000];   // full mission: expert ~800k
   MS.RANKS=['CADET','ENSIGN','LIEUTENANT','FLIGHT LEAD','CAPTAIN','WING COMMANDER','ACE OF NEO CITY']; MS.RANKSTEP=115000;
+  if(!/[?&]fable=0/.test(location.search)){ MS.STARS=[500000,800000,1100000]; MS.RANKSTEP=185000; } // FABLE: about 1.6x the targets and sweep rewards -> a good run is ~1.1-1.2 M now
 })();

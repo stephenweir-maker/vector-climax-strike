@@ -31,6 +31,7 @@
       s:P.s+400, x:0, y:0, vs:nominal(), vx:0, vy:0, fireT:rnd(1.2,2.4), tele:0, wpos:V3(), wvel:V3(), prev:V3(), yaw:0, roll:0, flash:0}, o||{});
     if(TPL[type]&&!e.obj){ e.obj=E.cloneModel(TPL[type]); G.scene.add(e.obj);
       if(D.fire){ const g=E.billboard(TPL.tele,type==='turret'?14:10,type==='turret'?14:10,true,0,1.8); g.position.set(0,type==='turret'?7:0.6,type==='turret'?-3:-6); g.visible=false; e.obj.add(g); e.teleG=g; } }
+    if(!/[?&]fable=0/.test(location.search)&&e.obj&&(type==='skimmer'||type==='razor'||type==='hunter'||type==='turret')){ const k=Math.min(innerWidth,innerHeight)<=500?1.5:1.2; /* FABLE: bigger targets, as stages 1-4 */ e.obj.scale.multiplyScalar(k); e.hr*=k; e.r*=k; }
     e.max=e.hp; R.toWorld(e.s,e.x,e.y,e.wpos); e.prev.copy(e.wpos);
     G.ENS.push(e); G.spawned++; return e;
   };

@@ -74,14 +74,19 @@
     ui.addEventListener('pointerdown',ev=>{ if(ev.pointerType==='mouse'&&!touch.on) return; ev.preventDefault(); A.unlock(); G.dev='touch'; G.anyInput=true; try{ ui.setPointerCapture(ev.pointerId); }catch(e){}
       const X=ev.clientX, Y=ev.clientY, id=ev.pointerId; const b=ev.target.closest&&ev.target.closest('[data-b]');
       if(scr!=='play'||G.paused||G.ph!=='fly'){ tapAt(X,Y); return; }
-      if(b){ press(b.dataset.b,id); return; }
+      if(b){ press(b.dataset.b,id); if(b.dataset.b==='fire'||b.dataset.b==='mis') touch.rk={id,onM:b.dataset.b==='mis'}; return; }
       if(X<innerWidth*0.45){ if(touch.stick==null){ touch.stick=id; touch.sx=X; touch.sy=Y; touch.x=touch.y=0; st.classList.add('live'); place(X,Y,0,0); } }
       else press('fire',id); },{passive:false});
-    ui.addEventListener('pointermove',ev=>{ if(ev.pointerId===touch.thr){ thrMove(ev.clientY); return; } if(ev.pointerId!==touch.stick) return; ev.preventDefault();
+    // GUN <-> MISSILE rocker, as on stages 1-4: hold GUN and roll the thumb onto MISSILE to fire without lifting (and the other way round)
+    const inBtn=(k,X,Y,pad)=>{ const el=ui.querySelector('[data-b="'+k+'"]'); if(!el) return false; const r=el.getBoundingClientRect(); return Math.hypot(X-(r.left+r.width/2),Y-(r.top+r.height/2))<r.width/2+(pad||0); };
+    function rocker(ev){ const rk=touch.rk; if(!rk||ev.pointerId!==rk.id||/[?&]fable=0/.test(location.search)) return false; const X=ev.clientX, Y=ev.clientY, onM=inBtn('mis',X,Y,4), onG=!onM&&inBtn('fire',X,Y,4), me=ui.querySelector('[data-b="mis"]');
+      if(onM&&!rk.onM){ rk.onM=true; touch.latch.mis=true; me.classList.add('on'); } else if(!onM&&rk.onM){ rk.onM=false; if(touch.btn.mis===rk.id) delete touch.btn.mis; me.classList.remove('on'); }
+      if(onG&&touch.btn.fire==null) press('fire',rk.id); return true; }
+    ui.addEventListener('pointermove',ev=>{ if(ev.pointerId===touch.thr){ thrMove(ev.clientY); return; } if(rocker(ev)){ ev.preventDefault(); return; } if(ev.pointerId!==touch.stick) return; ev.preventDefault();
       let dx=ev.clientX-touch.sx, dy=ev.clientY-touch.sy; const L=Math.hypot(dx,dy); if(L>RST){ const k=(L-RST)/L; touch.sx+=dx*k; touch.sy+=dy*k; dx-=dx*k; dy-=dy*k; }
       let nx=dx/RST, ny=dy/RST; const m=Math.hypot(nx,ny), dz=0.1; if(m<dz){ nx=ny=0; } else { const s=Math.min(1,(m-dz)/(1-dz))/m; nx*=s; ny*=s; }
       touch.x=nx; touch.y=ny; place(touch.sx,touch.sy,dx,dy); },{passive:false});
-    const end=ev=>{ const id=ev.pointerId; if(id===touch.stick){ touch.stick=null; touch.x=touch.y=0; st.classList.remove('live'); st.style.left=''; st.style.top=''; kn.style.transform=''; }
+    const end=ev=>{ const id=ev.pointerId; if(touch.rk&&touch.rk.id===id){ touch.rk=null; const me=ui.querySelector('[data-b="mis"]'); if(me) me.classList.remove('on'); } if(id===touch.stick){ touch.stick=null; touch.x=touch.y=0; st.classList.remove('live'); st.style.left=''; st.style.top=''; kn.style.transform=''; }
       if(id===touch.thr){ touch.thr=null; const n=performance.now(); if(n-(touch.thrUpT||0)<300&&touch.thrV>0.5) G.inp.slam=true; touch.thrUpT=n; }
       for(const b in touch.btn){ if(touch.btn[b]===id){ delete touch.btn[b]; const el=ui.querySelector('[data-b="'+b+'"]'); if(el) el.classList.remove('on'); } } };
     ui.addEventListener('pointerup',end); ui.addEventListener('pointercancel',end); ui.addEventListener('lostpointercapture',end);
@@ -90,7 +95,7 @@
     function place(cx,cy,dx,dy){ const h=(st.offsetWidth||130)/2; st.style.left=(cx-h)+'px'; st.style.top=(cy-h)+'px'; kn.style.transform=`translate(${dx}px,${dy}px)`; }
     function thrMove(Y){ const r=th.getBoundingClientRect(); const v=1-Math.max(0,Math.min(1,(Y-r.top-12)/(r.height-24))); touch.thrV=v; }
     IN.touchUI=()=>{ if(!touch.on) return; const md=(scr==='play'&&!G.paused&&G.ph==='fly')?'play':'menu'; if(ui.dataset.mode!==md) ui.dataset.mode=md;
-      const cb=ui.querySelector('[data-b="clx"]'); const rd=G.vcx&&(G.vcx.climax>=1||G.vcx.climaxT>0); if(cb.classList.contains('ready')!==rd) cb.classList.toggle('ready',rd);
+      const cb=ui.querySelector('[data-b="clx"]'); if(G.vcx){ const kk=Math.round((G.vcx.climaxT>0?1:G.vcx.climax)*36)/36; if(cb._k!==kk){ cb._k=kk; cb.style.setProperty('--k',kk); } } const rd=G.vcx&&(G.vcx.climax>=1||G.vcx.climaxT>0); if(cb.classList.contains('ready')!==rd) cb.classList.toggle('ready',rd);
       const pi=MS.promptInfo&&MS.promptInfo(); for(const [id,bb] of [['accel','boost'],['brake','brake']]){ const el=ui.querySelector('[data-b="'+bb+'"]'); const on=!!(pi&&pi.id===id); if(el&&el.classList.contains('cue')!==on) el.classList.toggle('cue',on); } };
   }
   /* ======================= test bots (?bot=comp|idle|mash) ======================= */

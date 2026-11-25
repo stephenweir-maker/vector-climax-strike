@@ -49,7 +49,7 @@
       ev:[
         // the first V was launched during take-off (it arrives as you get control); the squadron calls it
         [0.1,()=>{ G.say('BRICK','Twelve o\'clock! First ones are yours, Seven.',2.2); }],
-        [1.4,()=>S.vee(5,{noFire:1})], [2.1,()=>S.darts(6,{y:40,spread:36,z:1000})], [2.9,()=>S.line(5,{noFire:1})], [5.4,()=>S.column(5,{x:-30})], [7.6,()=>S.darts(6,{y:44,spread:40})], [9,()=>S.cross(5,{dir:1})],
+        [1.4,()=>S.vee(5,{noFire:1})], [2.1,()=>S.darts(6,{y:40,spread:36,z:1000})], [2.9,()=>S.line(5,{noFire:1})], [3.6,()=>{ if(G.NF) S.shooter({x:26,y:46,teach:1}); }], [5.4,()=>S.column(5,{x:-30})], [7.6,()=>S.darts(6,{y:44,spread:40})], [9,()=>S.cross(5,{dir:1})],
         [11.5,()=>{ S.ground(3,{kind:'boat',gap:150}); S.vee(4,{x:25}); }],
         // BRAKE moment: let the chasers overshoot into the sight
         [14.5,()=>{ S.chase(3); G.say('BRICK','Three on your six! BRAKE - let them overshoot!',2.4); G.prompt('brake',{reward:5000,label:'OVERSHOOT!'}); }],
@@ -243,7 +243,7 @@
     G.phT+=rdt; radioTick(rdt); if(G.ph!=='fly'&&G.ph!=='boss') G.tip=null;
     if(G.areaBanner){ G.areaBanner.t+=rdt; if(G.areaBanner.t>3) G.areaBanner=null; }
     if(G.eoBanner>0) G.eoBanner-=rdt; if(G.eoMsg&&!G.areaBanner){ G.eoMsg.t+=rdt; if(G.eoMsg.t>3) G.eoMsg=null; }
-    if(G.multiT>0) G.multiT-=rdt; if(G.warnBehind>0) G.warnBehind-=rdt; if(G.flashW>0) G.flashW-=rdt; if(G.flashR>0) G.flashR-=rdt;
+    if(G.multiT>0) G.multiT-=rdt; if(G.rackFx>0) G.rackFx-=rdt; if(G.dodgeTip>0) G.dodgeTip-=rdt; if(G.warnBehind>0) G.warnBehind-=rdt; if(G.flashW>0) G.flashW-=rdt; if(G.flashR>0) G.flashR-=rdt;
     // incoming missiles warning
     G.mWarn=G.SHOTS.some(s=>s.kind==='missile'&&!s.dead&&s.z>-260&&s.z<20); if(G.mWarn&&(G.t*4|0)%2===0) A.sfx.alarm();
     if(G.env.rain){ for(let i=0;i<7;i++) G.rain&&G.rain(); if(G.env.storm&&Math.random()<0.003){ G.flashW=Math.max(G.flashW||0,0.09); A.sfx.thunder(); } }
@@ -312,6 +312,6 @@
   G.stageClearDebug=stageClear;
   // pause menu: fly the current stage again from its start (score, armour and kill counts go back to what they were)
   G.retryStage=function(){ const P=G.P, n=G.stage; if(!n) return; G.score=G.stScore0||0; G.kills=G.stKills0||0; G.spawned=G.stSpawned0||0; P.dead=false; P.deadT=0; P.armor=G.stArmor0||100; P.climax=0; P.climaxT=0; P.inv=0; P.hurtT=0; P.rollT=0; P.spin=0; P.speed=1;
-    G.climaxFx=0; G.slowmo=0; G.whiteK=0; G._tdone=0; G.flashW=0; G.flashR=0; G.shake=0; G.combo=0; G.radioQ.length=0; G.radioCur=null; G.areaBanner=null; G.player.visible=true; A.climaxCancel&&A.climaxCancel();
+    G.climaxFx=0; G.slowmo=0; G.whiteK=0; G._tdone=0; G._teachSaid=0; G.dodgeTip=0; G.flashW=0; G.flashR=0; G.shake=0; G.combo=0; G.radioQ.length=0; G.radioCur=null; G.areaBanner=null; G.player.visible=true; A.climaxCancel&&A.climaxCancel();
     G._retry=1; G.startStage(n); G._retry=0; };
 })();

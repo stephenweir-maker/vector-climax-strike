@@ -18,7 +18,7 @@
         const b=atob(D.model), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
         new T.GLTFLoader().parse(u.buffer,'',g=>{
           const root=new T.Group(), m=g.scene;
-          m.traverse(o=>{ if(o.isMesh){ o.material.side=T.DoubleSide; if(o.material.map&&T.SRGBColorSpace) o.material.map.colorSpace=T.SRGBColorSpace; o.material.metalness=0.25; o.material.roughness=0.5;
+          m.traverse(o=>{ if(o.isMesh){ o.material.side=T.DoubleSide; if(o.material.map&&T.SRGBColorSpace) o.material.map.colorSpace=T.SRGBColorSpace; if(!o.material.metalnessMap){ o.material.metalness=0.25; o.material.roughness=0.5; } else if(o.material.emissiveMap&&T.SRGBColorSpace) o.material.emissiveMap.colorSpace=T.SRGBColorSpace;
             // rim light on the jet too (warm-white edge so the red jet separates from black space)
             const mt=o.material; mt.onBeforeCompile=sh=>{ sh.uniforms.deploy=M.w7deploy;
               sh.vertexShader='uniform float deploy;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n{ float ax=abs(transformed.x); float e=max(ax-0.11,0.0); float k=1.0-deploy; transformed.x=sign(transformed.x)*(min(ax,0.11)+e*mix(1.0,0.2,k)); transformed.y+=e*0.62*k; transformed.z+=e*0.3*k; }');

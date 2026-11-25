@@ -38,6 +38,13 @@
   G.camMode='abc'; const CV=Object.assign({},CAM.abc), CVt=Object.assign({},CAM.abc); G.CV=CV;
   G.camSnap=function(m){ G.camMode=m||G.camMode; Object.assign(CV,CAM[G.camMode]); Object.assign(CVt,CAM[G.camMode]); };
   G.opt = {autoFire:false, autoMissile:false, pixel:true, shake:true};
+  // FABLE feel pass (25 Nov, owner-approved): closer + bigger targets, sweep locks, full-rack reward. ?fable=0 = the old values (compare).
+  const NF = G.NF = !/[?&]fable=0/.test(location.search);
+  // phones (short side <= 500 px): enemies drawn and hit 1.6x, elsewhere 1.25x - a drone is ~20 px wide when it dies instead of ~12
+  G.enemyK=function(){ return NF?(Math.min(innerWidth,innerHeight)<=500?1.6:1.25):1; };
+  if(NF){ K.vulLife=0.13; /* vulcan reach 456 -> 312 */ K.lockZ=[-430,-40]; /* lock reach 580 -> 430 */ K.sweepDwell=0.08; K.sweepWin=0.55; K.misReload=0.18; K.misDelay=0.3; /* sweeps empty the rack faster: it comes back faster */
+    // shots that matter: longer, louder tell (a ring on the shooter), a 3-orb fan you slide out of, and a hit costs about twice as much
+    K.tellT=0.7; K.dmg.orb=11; K.dmg.missile=22; K.inv=1.0; }
   /* ---------------- state ---------------- */
   G.reset = function(){
     G.speedK=1; G.toCam=null; G.carrier=null; G._cat=0; G.camS=null; G.acq=null; G.combo=0; G.comboT=0;
@@ -186,23 +193,26 @@
       for(const e of ENS){ if(e.dead||e.noHit) continue; const r=(e.r||5)+1.2; if(segHit(px,py,pz,b.x,b.y,b.z,e.x,e.y,e.z,r)){ damage(e,K.vulDmg,'vul'); hit=true; psAdd.add({x:b.x,y:b.y,z:b.z,vx:rnd(-20,20),vy:rnd(-20,20),vz:rnd(-20,20),life:0.12,s0:2.2,s1:0.5,c:COL.yellow,a0:1,a1:0}); break; } }
       if(!hit) for(const s of SHOTS){ if(s.dead||!s.shootable) continue; if(segHit(px,py,pz,b.x,b.y,b.z,s.x,s.y,s.z,(s.r||2)+1.5)){ s.hp-=1; if(s.hp<=0){ killShot(s,true); } hit=true; break; } }
       if(!hit) for(const pr of PROPS){ if(pr.solidHit&&b.z>pr.z-pr.hd&&b.z<pr.z+pr.hd&&Math.abs(b.x-pr.x)<pr.hw&&b.y<pr.h){ hit=true; psAdd.add({x:b.x,y:b.y,z:b.z,vx:0,vy:10,vz:0,life:0.1,s0:1.6,s1:0.4,c:COL.orange,a0:0.8,a1:0,world:1}); break; } }
-      if(hit||b.t>K.vulLife||b.y<0){ BUL.splice(i,1); continue; }
+      if(hit||b.t>(NF&&G.boss&&!G.boss.dead?0.19:K.vulLife)||b.y<0){ BUL.splice(i,1); continue; } /* bosses sit further out: the vulcan keeps its old reach against them */
       psAdd.add({x:b.x,y:b.y,z:b.z,vx:0,vy:0,vz:0,life:0.045,s0:1.3,s1:0.7,c:COL.yellow,a0:1,a1:0.3});
       psAdd.add({x:(b.x+px)/2,y:(b.y+py)/2,z:(b.z+pz)/2,vx:0,vy:0,vz:0,life:0.04,s0:0.9,s1:0.5,c:COL.yellow,a0:0.7,a1:0});
     }
     // lock-on
-    const clx=P.climaxT>0, R=(clx?K.climaxSight:K.sightR)*Math.min(E.H,E.W*0.6), maxL=clx?K.climaxLocks:P.stock, gap=clx?K.climaxGap:K.lockGap;
+    const sweep=NF&&P.locks.length>0&&G.t-(G.lastLockT||0)<K.sweepWin; /* a sweep: the next locks come twice as fast while the sight keeps finding targets */
+    const coreOpen=NF&&G.boss&&!G.boss.dead&&G.boss.st==='fight'&&G.boss.parts.every(e=>e.dead||e.part.core); G.coreOpen=!!coreOpen; /* CORE EXPOSED: the sight opens up 1.5x for the finish */
+    const clx=P.climaxT>0, R=(clx?K.climaxSight:K.sightR*(NF&&Math.min(innerWidth,innerHeight)<=500?1.3:1)*(coreOpen?1.5:1))*Math.min(E.H,E.W*0.6), maxL=clx?K.climaxLocks:P.stock, gap=clx?K.climaxGap:(sweep?Math.min(K.lockGap,K.sweepDwell):K.lockGap);
     const a=G.aim(), sp=E.toScreen(a.x,a.y,a.z); G.sightS=sp; G.sightR=R;
     P.lockT-=rdt;
     // drop dead locks
     P.locks=P.locks.filter(l=>!l.e.dead&&l.e.z<40);
     if(sp && P.locks.length<maxL && G.ph!=='intro' && G.ph!=='takeoff'){
       let best=null, bd=1e9;
-      for(const e of ENS){ if(e.dead||!e.lockable||e.shield||e.z<K.lockZ[0]||e.z>K.lockZ[1]) continue; const need=e.lockNeed||1; if((e.lockN||0)>=need) continue; const q=E.toScreen(e.x,e.y,e.z); if(!q) continue; const d=Math.hypot(q.x-sp.x,q.y-sp.y); if(d<R+(clx?(e.r||5)*0.5:0) && d<bd){ bd=d; best=e; } }
+      const zFar=clx&&NF?-640:K.lockZ[0]; /* CLIMAX reaches further: the whole sky is in range */
+      for(const e of ENS){ if(e.dead||!e.lockable||e.shield||e.z<(e.boss&&NF?-640:zFar)||e.z>K.lockZ[1]) continue; const need=e.lockNeed||1; if((e.lockN||0)>=need) continue; const q=E.toScreen(e.x,e.y,e.z); if(!q) continue; const d=Math.hypot(q.x-sp.x,q.y-sp.y); if(d<R+(clx?(e.r||5)*0.5:0) && d<bd){ bd=d; best=e; } }
       for(const s of SHOTS){ if(s.dead||!s.lockable||s.z<-700||s.z>-30||(s.lockN||0)>=1) continue; const q=E.toScreen(s.x,s.y,s.z); if(!q) continue; const d=Math.hypot(q.x-sp.x,q.y-sp.y); if(d<R && d<bd){ bd=d; best=s; } }
       // the target has to stay inside the sight for a moment before it locks (none of that in CLIMAX)
       if(best&&G.acq&&G.acq.e===best) G.acq.t+=rdt; else G.acq=best?{e:best,t:0}:null;
-      if(best&&P.lockT<=0&&(clx||G.acq.t>=K.lockDwell)){ best.lockN=(best.lockN||0)+1; P.locks.push({e:best,t:0}); P.lockT=gap; A.sfx.lock(P.locks.length); G.lastLockT=G.t; G.acq=null; }
+      if(best&&P.lockT<=0&&(clx||G.acq.t>=(sweep?Math.min(K.lockDwell,K.sweepDwell):K.lockDwell))){ best.lockN=(best.lockN||0)+1; P.locks.push({e:best,t:0}); P.lockT=gap; A.sfx.lock(P.locks.length); G.lastLockT=G.t; G.acq=null; }
     } else G.acq=null;
     for(const l of P.locks) l.t+=rdt;
     // fire
@@ -232,7 +242,10 @@
     const P=G.P, L=P.locks; let i=0;
     for(const l of L){ const side=i%2?1:-1; const o=mdl('pmissile'); scene.add(o); o.visible=false;
       MIS.push({obj:o,x:P.x+side*4,y:P.y-1.5,z:-2,vx:side*rnd(60,140),vy:rnd(-60,20),vz:-120,t:0,delay:i*(clx?0.02:0.055),tg:l.e,clx}); i++; }
-    if(L.length) G.lastShotT=G.t; if(G.tel) G.tel('volley',L.length,clx); if(G.tut&&L.length) G.tut._v=1; if(L.length){ A.sfx.launch(L.length); if(!clx){ P.stock=Math.max(0,P.stock-L.length); P.relWait=K.misDelay; } if(L.length>=4){ G.multi=L.length; G.multiT=1.6; addScore(L.length*(clx?200:300)); } }
+    if(L.length) G.lastShotT=G.t; if(G.tel) G.tel('volley',L.length,clx); if(G.tut&&L.length) G.tut._v=1; if(L.length){ A.sfx.launch(L.length); if(!clx){ P.stock=Math.max(0,P.stock-L.length); P.relWait=K.misDelay; } if(NF&&!clx){ const nd=new Set(L.map(l=>l.e)).size, full=L.length>=K.misMax; /* pays for how many DIFFERENT targets one sweep took; a full rack reloads at once */
+        const pay=[0,0,500,1500,3000,5000,8000,11000,15000][Math.min(8,nd)]+(full&&nd>=4?5000:0); if(full){ P.stock=K.misMax; P.relWait=0; P.reload=0; G.rackFx=0.5; }
+        if(pay){ addScore(pay); G.cpop={txt:(full?'FULL RACK  x':'x')+nd+(full?'':' MULTI LOCK'),sub:'+'+pay,t:0,col:full?'#ff4fd8':'#ffd23a'}; if(nd>=4||full) A.sfx.bonus&&A.sfx.bonus(); G.multiN=(G.multiN||0)+(nd>=4?1:0); G.fullN=(G.fullN||0)+(full?1:0); } }
+      else if(L.length>=4){ if(!NF){ G.multi=L.length; G.multiT=1.6; } addScore(L.length*(clx?200:300)); } }
     for(const l of L){ if(l.e.lockN) l.e.lockN=0; }
     P.locks=[];
   }
@@ -255,7 +268,7 @@
     if(e.dead) return;
     if(e.armorFront&&src==='vul'){ psAdd.add({x:e.x,y:e.y,z:e.z+2,vx:0,vy:0,vz:0,life:0.08,s0:2,s1:0.5,c:COL.white,a0:1,a1:0}); A.sfx.clang(); return; }
     if(e.shield){ A.sfx.clang(); return; }
-    if(e.boss){ if(src==='vul') d*=0.5; addScore(src==='vul'?10:100); } e.hp-=d; e.hitT=0.08; if(src==='vul') A.sfx.hit();
+    if(e.boss){ if(src==='vul'&&!(NF&&e.part&&e.part.core)) d*=0.5; /* the exposed core takes the vulcan at full strength */ addScore(src==='vul'?10:100); } e.hp-=d; e.hitT=0.08; if(src==='vul') A.sfx.hit();
     if(e.boss&&e.part){ e.part.hp=e.hp; const bb=G.bossBar; if(bb&&!(bb.cd>0)){ bb.hitT=0.06; bb.cd=src==='vul'?0.3:0.12; } }
     if(e.hp<=0) kill(e,src,clx||G.P.climaxT>0);
   }
@@ -276,7 +289,7 @@
     if(!wing&&(e.great||(e.big&&!e.boss))){ const gb=e.great||(e.lockNeed>=4?15000:10000); addScore(gb); G.greatN=(G.greatN||0)+1; if(clx) G.clxSum=(G.clxSum||0)+gb; else { const x0=e.x,y0=e.y,z0=e.z; G.after(0.15,()=>G.pops.push({x:x0,y:y0+6,z:z0,t:0,txt:'GREAT',sub:'+'+gb,c:'#40f0ff',big:1})); } }
     if(wing&&G.wingKill) G.wingKill(e);
     if(e.count!==false){ G.kills++; G.stKills++; }
-    const big=e.big||(e.r||5)>9; boom(e.x,e.y,e.z,big?12:6.5,e.boomCol,e.ground?1:0); A.sfx.boom(big);
+    const big=e.big||(e.rr||e.r||5)>9; boom(e.x,e.y,e.z,big?12:(NF?8:6.5),e.boomCol,e.ground?1:0); A.sfx.boom(big);
     if(e.boss&&e.part&&!e.part.core){ // part break: second blast, falling wreck, a label, a kick
       const x=e.x,y=e.y,z=e.z; G.shake=Math.max(G.shake||0,9); G.pops.push({x,y:y+8,z,t:-0.6,txt:(e.name||'PART')+' DESTROYED',c:'#ffd23a',big:1});
       G.after(0.18,()=>{ boom(x+rnd(-6,6),y+rnd(-3,5),z,9,COL.yellow,0); A.sfx.boom(false); });
@@ -297,6 +310,7 @@
     const P=G.P; if(P.dead||P.inv>0||G.god) return false;
     if(P.rollT>0&&why!=='crash'){ G.pops.push({x:P.x,y:P.y+6,z:-10,t:0,txt:'DODGE',c:'#40f0ff'}); addScore(300); return false; }
     (G._hurtLog=G._hurtLog||[]).push({t:G.t,why}); if(G._hurtLog.length>10) G._hurtLog.shift();
+    if(NF&&G.stage===1&&(why==='orb'||why==='missile')) n=Math.round(n*0.75); /* stage 1 teaches: its hits cost a quarter less */
     if(G.ex&&G.ex.armor) n*=0.5; G.stDmg=(G.stDmg||0)+n; P.armor=Math.max(0,P.armor-n); P.inv=K.inv; P.hurtT=0.25; P.dmgTaken+=n; G.shake=Math.max(G.shake||0,why==='crash'?14:8); G.flashR=0.35; A.sfx.hurt();
     boom(P.x+rnd(-2,2),P.y,0,2.5,COL.red); if(G.tel) G.tel('hurt',why,n,x,y,z);
     // Battle Pod hit feedback: a diagonal arrow on screen pointing at where the hit came from, DANGER, a red edge flash, rumble
@@ -320,7 +334,7 @@
   function die(){ const P=G.P; clearLocks(); P.dead=true; P.deadT=0; P._dy=0; P._dvy=6; P._db=0; P.rollDir=P.vx<0?-1:1; if(P.climaxT>0){ P.climaxT=0; G.climaxFx=0; } A.climaxCancel&&A.climaxCancel(); boom(P.x,P.y,0,10,COL.red); A.sfx.boom(true); G.ph_before=G.ph; G.ph='dead'; G.phT=0; G.say('VEGA','SEVEN! Eject- no, hang on, pull up! PULL UP!',3); }
   /* ---------------- enemies ---------------- */
   const SPAWN = G.SPAWN = {};
-  function addEnemy(o){ const e=Object.assign({hp:3,r:7,pts:1000,lockable:true,x:0,y:30,z:-1200,vx:0,vy:0,vz:0,t:0,fireT:rnd(1,2.5),lockN:0,lockNeed:1,climax:0.016},o); e.max=e.hp; if(!e.boss&&!o.abs&&G.P&&G.mode==='play'){ const f=e.ground?0.3:0.4, /* waves only half-follow the jet: you have to sweep the sight onto them */ dx=G.P.x*f; e.x+=dx; if(e.tx!=null) e.tx+=dx; if(e.cx!=null&&e.ai===AI.swirl) e.cx+=dx; } if(e.count!==false){ G.spawned++; G.stSpawned++; } if(e.obj&&!e.boss){ scene.add(e.obj); e.obj.position.set(e.x,e.y,e.z); } ENS.push(e); return e; }
+  function addEnemy(o){ const e=Object.assign({hp:3,r:7,pts:1000,lockable:true,x:0,y:30,z:-1200,vx:0,vy:0,vz:0,t:0,fireT:rnd(1,2.5),lockN:0,lockNeed:1,climax:0.016},o); e.max=e.hp; if(!e.boss&&!o.abs&&G.P&&G.mode==='play'){ const f=e.ground?0.3:0.4, /* waves only half-follow the jet: you have to sweep the sight onto them */ dx=G.P.x*f; e.x+=dx; if(e.tx!=null) e.tx+=dx; if(e.cx!=null&&e.ai===AI.swirl) e.cx+=dx; } if(e.count!==false){ G.spawned++; G.stSpawned++; } if(!e.boss){ const k=G.enemyK(); e.rr=e.r; /* ram radius stays the old size */ if(k!==1){ e.r*=k; if(e.obj) e.obj.scale.multiplyScalar(k); } } if(e.obj&&!e.boss){ scene.add(e.obj); e.obj.position.set(e.x,e.y,e.z); } ENS.push(e); return e; }
   G.addEnemy=addEnemy;
   const RIG={}; // model caches (clone)
   const MSC={dart:1.9,bomber:1.7,drone:2.05,gunship:1.6,missile:1.25,turret:1.15,boat:1.15,tank:1.15,node:1.1,tanker:1.1};
@@ -342,9 +356,10 @@
       if(s.kind==='missile'){ const dx=P.x-s.x, dy=P.y-s.y, dz=0-s.z, L=Math.hypot(dx,dy,dz)||1; const tr=1-Math.exp(-s.turn*dt*(s.t<0.4?0.2:1)); const sp=Math.min(s.sp,s.sp*0.6+s.t*s.sp);
         if(s.z<-8||s.t<0.6){ s.vx=lerp(s.vx,dx/L*sp,tr); s.vy=lerp(s.vy,dy/L*sp,tr); s.vz=lerp(s.vz,dz/L*sp,tr); }
         orient(s.obj,s.vx,s.vy,s.vz); psNorm.add({x:s.x,y:s.y,z:s.z,vx:rnd(-2,2),vy:rnd(0,3),vz:0,life:0.9,s0:1.1,s1:3.6,c:[0.7,0.68,0.72],c1:[0.4,0.38,0.44],a0:0.55,a1:0,k:2,rot:Math.random()*6,ease:1,world:1}); psAdd.add({x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0,life:0.06,s0:2.6,s1:1,c:COL.pink,a0:1,a1:0}); }
-      else { psAdd.add({x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0,life:0.035,s0:s.r*1.4,s1:s.r,c:COL.pink,a0:1,a1:0.6}); psAdd.add({x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0,life:0.035,s0:s.r*0.55,s1:s.r*0.4,c:COL.white,a0:1,a1:1}); }
+      else { const vk=NF?1.7:1; /* drawn bigger than it hits */ psAdd.add({x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0,life:0.035,s0:s.r*1.4*vk,s1:s.r*vk,c:COL.pink,a0:1,a1:0.6}); psAdd.add({x:s.x,y:s.y,z:s.z,vx:0,vy:0,vz:0,life:0.035,s0:s.r*0.55*vk,s1:s.r*0.4*vk,c:COL.white,a0:1,a1:1}); }
       const px=s.x,py=s.y,pz=s.z, sf=G.ex&&G.ex.slow?0.7:1; s.x+=s.vx*dt*sf; s.y+=s.vy*dt*sf; s.z+=s.vz*dt*sf; if(s.obj) s.obj.position.set(s.x,s.y,s.z);
-      if(!P.dead&&segHit(px,py,pz,s.x,s.y,s.z,P.x,P.y,0,s.r+3.2)){ const vl=Math.hypot(s.vx,s.vy,s.vz)||1; if(hurtPlayer(s.dmg,s.kind,s.x-s.vx/vl*60,s.y-s.vy/vl*60,s.z-s.vz/vl*60)){ killShot(s,false); continue; } }
+      if(!P.dead&&segHit(px,py,pz,s.x,s.y,s.z,P.x,P.y,0,s.r+3.2)){ const vl=Math.hypot(s.vx,s.vy,s.vz)||1; if(s.grp) s.grp.hit=true; if(hurtPlayer(s.dmg,s.kind,s.x-s.vx/vl*60,s.y-s.vy/vl*60,s.z-s.vz/vl*60)){ killShot(s,false); continue; } }
+      if(s.grp&&!s._past&&s.z>=0){ s._past=1; const g=s.grp; if(Math.hypot(s.x-P.x,s.y-P.y)<34) g.near=true; if(--g.n<=0&&!g.hit&&g.near&&!P.dead){ /* the fan went by and you were in its path: a dodge */ G.dodgeN=(G.dodgeN||0)+1; if(g.teach){ addScore(1000); G.cpop={txt:'CLEAN DODGE',sub:'+1000',t:0,col:'#40f0ff'}; A.sfx.bonus&&A.sfx.bonus(); } else { addScore(300); G.pops.push({x:P.x,y:P.y+6,z:-10,t:0,txt:'DODGE',c:'#40f0ff'}); } } }
       if(s.t>s.life||s.z>120||s.y<-2){ if(s.y<0&&s.kind==='missile') boom(s.x,1,s.z,2,COL.pink,1); killShot(s,false); }
     }
   }
@@ -362,7 +377,7 @@
       if(e.obj&&!e.boss){ e.obj.position.set(e.x,e.y,e.z); if(e.face!==false){ const fz=e.vz+(e.ground?0:(e.faceZ||0)); let fy=e.vy; if(!e.ground){ const cp=cam.position, dl=Math.hypot(cp.x-e.x,cp.y-e.y,cp.z-e.z)||1, ly=(cp.y-e.y)/dl; fy=(fz>0?ly-0.38:-ly-0.38)*Math.abs(fz)+e.vy*0.3; } orient(e.obj,e.vx,fy,fz); } if(e.bank!=null) e.obj.rotateZ(e.bank+(e.ground?0:Math.sin(e.t*1.6+(e.ph||0))*0.45)); }
       if(e.obj&&e.hitT>0&&e.obj.userData.solid){ e.obj.userData.solid.material=E.flashMat; } else if(e.obj&&e.obj.userData.solid&&e.obj.userData.solid.material===E.flashMat){ e.obj.userData.solid.material=E.matSolid(); }
       // ram
-      if(!e.ground&&!e.boss&&!P.dead&&!(e.ai===AI.chase&&e.st===0)&&Math.abs(e.z)<(e.r+4)&&Math.hypot(e.x-P.x,e.y-P.y)<e.r+3){ if(hurtPlayer(K.dmg.ram,'ram',e.x,e.y,e.z-30)){ kill(e,'ram'); continue; } }
+      if(!e.ground&&!e.boss&&!P.dead&&!(e.ai===AI.chase&&e.st===0)&&Math.abs(e.z)<((e.rr||e.r)+4)&&Math.hypot(e.x-P.x,e.y-P.y)<(e.rr||e.r)+3){ if(hurtPlayer(K.dmg.ram,'ram',e.x,e.y,e.z-30)){ kill(e,'ram'); continue; } }
       if(e.z>140||e.z<-2600||e.y<-30||e.y>260||Math.abs(e.x)>600){ if(!e.boss){ e.dead=true; if(e.obj) scene.remove(e.obj); ENS.splice(i,1); if(e.onEscape) e.onEscape(e); } }
     }
   }
@@ -370,16 +385,23 @@
      v9 pass-by lanes: air enemies arrive fast from far away (the telegraph), slow right down inside the kill zone (z -540..-125) so they are
      big on screen and lockable for about 3.5 s, then break away past the camera. Most kills now happen close, so explosions are big. */
   // fast from far, cruise through the kill zone, then hang close and big (z -230..-110) for about 1.5 s before breaking past
-  function apprV(e){ return e.z<(e.zIn||-540)?(e.fast||440):e.z<-230?(e.app||115):Math.min(e.app||115,78); }
+  function apprV(e){ return e.z<(e.zIn||(NF?-450:-540))?(e.fast||440):e.z<-230?(e.app||115):Math.min(e.app||115,78); }
   // a shot is always announced: the muzzle glows for 0.45 s before it leaves
-  function fireTell(e,dt,inRange){ if(e.noFire||!(e.fireT<90)) return false; if(!inRange) return false; e.fireT-=dt;
-    if(e.fireT<0.45) psAdd.add({x:e.x,y:e.y,z:e.z+3,vx:0,vy:0,vz:0,life:0.05,s0:(e.r||6)*(1.6-e.fireT*2.2),s1:(e.r||6)*0.6,c:COL.pink,a0:0.9,a1:0.3});
-    return e.fireT<=0; }
+  function fireTell(e,dt,inRange){ if(e.noFire||!(e.fireT<90)){ e.tellK=0; return false; } if(!inRange){ if(e.tellK>0&&NF){ /* left the firing window mid-tell: stand down */ e.tellK=0; e.fireT=Math.max(e.fireT,K.tellT); } return false; }
+    const T=K.tellT||0.45; if(NF&&!e._tl){ e._tl=1; if(e.fireT<T) e.fireT=T; /* the full tell is always shown, however late the shooter arrived */ }
+    const was=e.fireT; e.fireT-=dt;
+    if(e.fireT<T){ if(was>=T&&NF&&!e.boss&&e.z>-700){ A.sfx.charge&&A.sfx.charge(); if(e.teach&&!G._teachSaid){ G._teachSaid=1; G.dodgeTip=2.6; G.say('JUNO','That one is charging up - slide out of its line!',2.2); } }
+      e.tellK=NF?Math.min(1,1-e.fireT/T):0; psAdd.add({x:e.x,y:e.y,z:e.z+3,vx:0,vy:0,vz:0,life:0.05,s0:(e.r||6)*(1.6-e.fireT/T),s1:(e.r||6)*0.6,c:COL.pink,a0:0.9,a1:0.3}); }
+    if(e.fireT<=0){ e.tellK=0; return true; } return false; }
+  // a shooter's volley: three orbs fanned across where you are heading - one small slide gets you out of it (or between them)
+  function fan(e,spd){ const P=G.P; if(!NF){ return shoot(e,'orb',spd,1); } if(e.z>-700&&!e.boss) A.sfx.eshot(); const ft=Math.min(1.3,Math.hypot(e.x-P.x,e.y-P.y,e.z)/spd), XM=G.laneX||(G.env&&G.env.xMax)||K.xMax, tx=clamp(P.x+P.vx*ft*0.7,-XM,XM), ty=P.y+P.vy*ft*0.4, grp={n:3,hit:false,near:false,teach:!!e.teach};
+    for(let i=-1;i<=1;i++){ const dx=tx+i*26-e.x, dy=ty-e.y, dz=-e.z, L=Math.hypot(dx,dy,dz)||1; SHOTS.push({isShot:1,kind:'orb',x:e.x,y:e.y,z:e.z,vx:dx/L*spd,vy:dy/L*spd,vz:dz/L*spd,t:0,life:4,r:2.4,dmg:K.dmg.orb,grp}); } }
+  G.fan=fan;
   const AI = G.AI = {
     // head-on attackers: rush in, cruise through the kill zone, some fire once, break away past the player
     head(e,dt){ if(!e._in){ e._in=1; e.ph=e.ph||rnd(0,6); }
       if(!e.brk){ e.vz=apprV(e); e.vx=Math.sin(e.t*(e.wf||1.4)+e.ph)*(e.wx||12)+(e.cx||0); e.vy=Math.cos(e.t*1.1+e.ph)*(e.wy||5); e.bank=-e.vx/80;
-        if(fireTell(e,dt,e.z>-500&&e.z<-250)){ e.fireT=99; shoot(e,e.gun||'orb',e.gun==='missile'?300:330,1); }
+        if(fireTell(e,dt,NF?(e.z>-425&&e.z<-200):(e.z>-500&&e.z<-250))){ e.fireT=99; if(e.gun==='missile') shoot(e,'missile',300,1); else fan(e,330); if(e.teach) e.hp=Math.min(e.hp,5); }
         if(e.z>-110){ e.brk=1; const s=e.x>G.P.x?1:-1; e.bx=s*rnd(80,120); e.vyb=rnd(20,60)*(e.y>G.P.y?1:-0.3); } }
       else { e.vz=Math.min(420,e.vz+900*dt); e.vx=lerp(e.vx,e.bx,1-Math.exp(-6*dt)); e.vy+=(e.vyb||0)*dt*3; e.bank=-e.vx/150; } },
     // from behind: overtake, hold in front, fire missiles, leave
@@ -392,12 +414,12 @@
       e.bank=-e.vx/90; e.faceZ=-300; },
     // crossing line: flies across the view, close
     cross(e,dt){ if(!e._in){ e._in=1; e.vx=e.dir*(e.spd||rnd(95,120)); e.vz=e.app||55; }
-      e.vy=Math.sin(e.t*2+e.x*0.01)*8; e.bank=-e.dir*0.6; if(fireTell(e,dt,e.z>-520&&e.z<-200&&Math.abs(e.x-G.P.x)<120)){ e.fireT=99; shoot(e,'orb',320,1); } },
+      e.vy=Math.sin(e.t*2+e.x*0.01)*8; e.bank=-e.dir*0.6; if(fireTell(e,dt,e.z>(NF?-430:-520)&&e.z<-200&&Math.abs(e.x-G.P.x)<120)){ e.fireT=99; fan(e,320); } },
     // spiral (swirl) approach
     swirl(e,dt){ if(!e._in){ e._in=1; e.a0=e.a0||0; }
       if(!e.brk) e.vz=apprV(e); else e.vz=Math.min(440,e.vz+900*dt);
       const a=e.a0+e.t*2.0, R=Math.max(12,46-e.t*3.5); const tx=Math.cos(a)*R+(e.cx||0), ty=(e.cy||40)+Math.sin(a)*R*0.55; e.vx=(tx-e.x)*3; e.vy=(ty-e.y)*3; e.bank=-e.vx/90;
-      if(fireTell(e,dt,e.z>-500&&e.z<-250)){ e.fireT=99; shoot(e,'orb',320,1); } if(e.z>-110&&!e.brk){ e.brk=1; } },
+      if(fireTell(e,dt,NF?(e.z>-425&&e.z<-200):(e.z>-500&&e.z<-250))){ e.fireT=99; fan(e,320); } if(e.z>-110&&!e.brk){ e.brk=1; } },
     // dart swarm: a loose cloud that weaves in and streams past (CLIMAX fodder, never fires)
     dart(e,dt){ if(!e._in){ e._in=1; e.ph=rnd(0,6); e.wf=rnd(1.6,2.6); }
       if(!e.brk){ e.vz=apprV(e); e.vx=Math.sin(e.t*e.wf+e.ph)*26; e.vy=Math.cos(e.t*e.wf*0.8+e.ph)*14; if(e.z>-110){ e.brk=1; e.bx=(e.x>G.P.x?1:-1)*rnd(60,110); } }
@@ -423,15 +445,18 @@
     node(e,dt){ e.face=false; if(e.obj) e.obj.rotation.y+=dt*1.5; }
   };
   /* ---- formations (used by the stage scripts). Spawn far (z about -1300) so every wave is seen coming. ---- */
-  const DR=(o)=>Object.assign({obj:mdl('drone'),ai:AI.head,hp:4,r:7,pts:1000,fireT:99},o);
+  const DR=(o)=>Object.assign({obj:mdl('drone'),ai:AI.head,hp:NF?6:4,r:7,pts:1000,fireT:99},o);
   // how many of a wave shoot, and how often the hunters fire, rises stage by stage (G.diff: 0.7, 1, 1.25, 1.5)
-  const fT=(o,p)=>(o.noFire||Math.random()>(p==null?0.35:p)*(G.diff||1))?99:rnd(0.3,1.6);
+  // FABLE: every wave has ONE clear shooter (its leader, p >= 0.7: always fires); the others join in more often stage by stage
+  const fT=(o,p)=>NF?((o.noFire||(!((p==null?0.35:p)>=0.7)&&Math.random()>(p==null?0.35:p)*0.6*(G.diff||1)))?99:rnd(0.8,1.5)):((o.noFire||Math.random()>(p==null?0.35:p)*(G.diff||1))?99:rnd(0.3,1.6));
   SPAWN.vee = (n,o)=>{ o=o||{}; const cx=o.x!=null?o.x:rnd(-30,30), cy=o.y!=null?o.y:rnd(28,52); for(let i=0;i<n;i++){ const k=Math.ceil(i/2)*(i%2?1:-1); addEnemy(DR({x:cx+k*14,y:cy+Math.abs(k)*3,z:-1300-Math.abs(k)*55,wx:o.wx||8,gun:o.gun,fireT:i===0?fT(o,o.fire!=null?o.fire:0.7):fT(o,0.2)})); } };
-  SPAWN.line = (n,o)=>{ o=o||{}; const y=o.y||rnd(25,55); for(let i=0;i<n;i++){ addEnemy(DR({x:(o.x||0)+(i-(n-1)/2)*17,y:y,z:-1280,wx:4,wy:2,fireT:fT(o,0.25)})); } };
+  SPAWN.line = (n,o)=>{ o=o||{}; const y=o.y||rnd(25,55); for(let i=0;i<n;i++){ addEnemy(DR({x:(o.x||0)+(i-(n-1)/2)*17,y:y,z:-1280,wx:4,wy:2,fireT:fT(o,i===(n>>1)?0.7:0.25)})); } };
   SPAWN.column = (n,o)=>{ o=o||{}; const x=o.x!=null?o.x:rnd(-35,35), y=o.y||rnd(28,52), ph=rnd(0,6); for(let i=0;i<n;i++){ addEnemy(DR({x:x,y:y,z:-1280-i*58,wx:16,wy:7,wf:1.1,ph:ph+i*0.5,fireT:i===n-1?fT(o,0.8):99})); } };
   SPAWN.cross = (n,o)=>{ o=o||{}; const dir=o.dir||(Math.random()<0.5?1:-1); for(let i=0;i<n;i++){ addEnemy(DR({x:-dir*(150+i*24),y:(o.y||40)+i*2,z:-(o.z||470)-i*18,ai:AI.cross,dir,app:o.app,fireT:i%3===1?rnd(0.9,2.2):99})); } };
   SPAWN.pincer = (n,o)=>{ o=o||{}; const h=Math.ceil(n/2); SPAWN.cross(h,{dir:1,y:(o.y||34),z:o.z||440}); SPAWN.cross(n-h,{dir:-1,y:(o.y||34)+16,z:(o.z||440)+60}); };
   SPAWN.swirl = (n,o)=>{ o=o||{}; for(let i=0;i<n;i++){ addEnemy(DR({x:0,y:o.y||40,z:-1300-i*52,ai:AI.swirl,a0:i*0.8,cx:o.x||0,cy:o.y||40,fireT:i%4===0?rnd(0.5,1.4):99})); } };
+  // the lone shooter that teaches the dodge (stage 1, about 6 s in): slow, alone, long tell
+  SPAWN.shooter = (o)=>{ o=o||{}; return addEnemy(DR({x:o.x||0,y:o.y||42,z:-1300,wx:3,wy:1,app:62,teach:o.teach?1:0,hp:o.teach?40:6,/* armoured until it has fired its one lesson */ fireT:o.t||0.75})); };
   SPAWN.chase = (n,o)=>{ o=o||{}; G.warnBehind=2.4; A.sfx.alarm(); for(let i=0;i<n;i++){ const s=o.xs?o.xs[i%o.xs.length]:(i%2?1:-1)*(10+i*14); addEnemy(DR({abs:o.xs?1:0,x:s,y:o.y0!=null?o.y0:-20,z:90+i*30,ai:AI.chase,tx:o.xs?s:s*1.4,ty:(o.y||42)+(i%3)*(o.dy!=null?o.dy:8),tz:-185-i*18,hold:rnd(5,7),fireT:rnd(1.0,2.6),hp:5})); } };
   // darts: small cyan swarm drones, one vulcan burst or one missile each
   SPAWN.darts = (n,o)=>{ o=o||{}; const cx=o.x||0, cy=o.y||42, sp=o.spread||60; for(let i=0;i<n;i++){ addEnemy({obj:mdl('dart'),ai:AI.dart,x:cx+rnd(-sp,sp),y:clamp(cy+rnd(-sp*0.4,sp*0.4),14,80),z:-(o.z||1300)-rnd(0,o.depth||260),fast:o.fast,zIn:o.zIn,app:o.app||105,hp:1,r:5.5,pts:400,climax:0.008,fireT:99,dart:1,count:o.count,boomCol:COL.cyan}); } };
@@ -467,7 +492,7 @@
     const SC=[0,3.0,2.0,2.6,1.6][n]; root.scale.setScalar(SC);
     const boss={n, B, root, sc:SC, x:0, y:n===4?58:(n===1?30:46), z:n===3?160:-1600, t:0, st:'in', parts:[], dead:false, timeT:n===4?130:90, name:B.name};
     G.boss=boss;
-    for(const p of B.parts){ const e=addEnemy({boss:1,part:p,obj:p.obj,hp:p.hp*HPK,r:p.r*SC,pts:p.core?50000:5000,lockNeed:p.core?6:3,big:1,climax:p.core?0.2:0.08,count:false,face:false,shield:!!p.core,x:0,y:0,z:-2000,name:p.name}); e.max=p.hp*HPK; p.e=e; boss.parts.push(e); }
+    for(const p of B.parts){ const e=addEnemy({boss:1,part:p,obj:p.obj,hp:p.hp*HPK,r:p.r*SC,pts:p.core?50000:5000,lockNeed:p.core?(NF?3:6):3,big:1,climax:p.core?0.2:0.08,count:false,face:false,shield:!!p.core,x:0,y:0,z:-2000,name:p.name}); e.max=p.hp*HPK; p.e=e; boss.parts.push(e); }
     G.bossBar={name:B.name, k:1};
     if(n===4){ root.position.set(0,boss.y,-1700); }
     return boss;

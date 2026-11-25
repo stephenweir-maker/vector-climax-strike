@@ -121,7 +121,7 @@
       if(G.demo) return;
       const X=ev.clientX, Y=ev.clientY, id=ev.pointerId;
       const b=ev.target.closest&&ev.target.closest('[data-b]');
-      if(b){ if(b.dataset.b==='thr'){ touch.thr=id; touch.thrT0=performance.now(); touch.thrV0=touch.thrV; thrMove(Y); return; } press(b.dataset.b,id); return; }
+      if(b){ if(b.dataset.b==='thr'){ touch.thr=id; touch.thrT0=performance.now(); touch.thrV0=touch.thrV; thrMove(Y); return; } press(b.dataset.b,id); if(b.dataset.b==='gun'||b.dataset.b==='mis') touch.rk={id,onM:b.dataset.b==='mis'}; return; }
       if(flying()){
         if(X<innerWidth*0.6){ if(touch.stick==null){ touch.stick=id; touch.sx=X; touch.sy=Y; touch.x=touch.y=0; touch.moved=false; stickEl.classList.add('used'); placeStick(X,Y,0,0); } }
         else press('zone',id); // holding the empty right side = vulcan (same as the GUN button)
@@ -129,7 +129,16 @@
       }
       tapAt(X,Y);
     },{passive:false});
-    ui.addEventListener('pointermove',ev=>{ if(ev.pointerId===touch.thr){ ev.preventDefault(); thrMove(ev.clientY); return; } if(ev.pointerId!==touch.stick) return; ev.preventDefault();
+    // GUN <-> MISSILE rocker (one thumb, two weapons): a thumb that went down on GUN keeps the vulcan firing and fires the missiles each time it
+    // rolls onto MISSILE (no lifting); one that went down on MISSILE can roll onto GUN to hold the vulcan. Guns still fire only while pressed.
+    const inBtn=(k,X,Y,pad)=>{ const el=ui.querySelector('[data-b="'+k+'"]'); if(!el) return false; const r=el.getBoundingClientRect(); return Math.hypot(X-(r.left+r.width/2),Y-(r.top+r.height/2))<r.width/2+(pad||0); };
+    const misEl=()=>ui.querySelector('[data-b="mis"]');
+    function rocker(ev){ const rk=touch.rk; if(!rk||ev.pointerId!==rk.id||!G.NF) return false; const X=ev.clientX, Y=ev.clientY, onM=inBtn('mis',X,Y,4), onG=!onM&&inBtn('gun',X,Y,4);
+      if(onM&&!rk.onM){ rk.onM=true; touch.latch.mis=1; touch.rockN=(touch.rockN||0)+1; misEl().classList.add('on'); }
+      else if(!onM&&rk.onM){ rk.onM=false; if(touch.btn.mis===rk.id) delete touch.btn.mis; misEl().classList.remove('on'); }
+      if(onG&&touch.btn.gun==null) press('gun',rk.id);
+      return true; }
+    ui.addEventListener('pointermove',ev=>{ if(ev.pointerId===touch.thr){ ev.preventDefault(); thrMove(ev.clientY); return; } if(rocker(ev)){ ev.preventDefault(); return; } if(ev.pointerId!==touch.stick) return; ev.preventDefault();
       let dx=ev.clientX-touch.sx, dy=ev.clientY-touch.sy; const L=Math.hypot(dx,dy);
       if(L>RSTICK){ const k=(L-RSTICK)/L; touch.sx+=dx*k; touch.sy+=dy*k; dx-=dx*k; dy-=dy*k; } // drag the base along
       let nx=dx/RSTICK, ny=dy/RSTICK; const m=Math.hypot(nx,ny), dz=0.07;
@@ -139,7 +148,7 @@
     // throttle slider: the knob follows the finger; a quick flick up to the top slams full throttle
     const thrEl=document.getElementById('tthr'); touch.thrEl=thrEl; touch.thrK=document.getElementById('tthrk'); touch.thrN=document.getElementById('tthrn'); touch.thrV=0.4375;
     function thrMove(Y){ const r=thrEl.getBoundingClientRect(); const v=1-Math.max(0,Math.min(1,(Y-r.top-14)/Math.max(1,r.height-28))); touch.thrV=v; if(v>0.95&&touch.thrV0<0.7&&performance.now()-touch.thrT0<300){ touch.slam=true; touch.thrV0=1; } }
-    const end=ev=>{ const id=ev.pointerId; if(id===touch.thr){ touch.thr=null; } if(id===touch.stick){ touch.stick=null; touch.x=touch.y=0; restStick(); }
+    const end=ev=>{ const id=ev.pointerId; if(touch.rk&&touch.rk.id===id){ touch.rk=null; const me=ui.querySelector('[data-b="mis"]'); if(me) me.classList.remove('on'); } if(id===touch.thr){ touch.thr=null; } if(id===touch.stick){ touch.stick=null; touch.x=touch.y=0; restStick(); }
       for(const k in touch.btn){ if(touch.btn[k]===id){ delete touch.btn[k]; const el=ui.querySelector('[data-b="'+k+'"]'); if(el) el.classList.remove('on'); } } };
     ui.addEventListener('pointerup',end); ui.addEventListener('pointercancel',end); ui.addEventListener('lostpointercapture',end);
     // stop the page from scrolling, zooming or opening the long-press menu under the game
@@ -222,7 +231,7 @@
   G.onGameOver=function(){ A.sfx.gameover(); setTimeout(()=>{ finish(false); },1500); };
   G.onEnding=function(){ startEnding(); };
   G.onBridgeDone=function(){ G.onStageCleared(4); if(G.demo){ toTitle(); return; } if(G.bot||Q.get('nos5')==='1'){ finish(true); return; } toStage5(runOut()); }; // on to stage 5 SUNFALL (its own page)
-  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); rank=pts>7000?'S':pts>5800?'A':pts>4400?'B':pts>2800?'C':'D'; // C3 scale (stages 1-4 + SUNFALL): average clean clear ~5.4 M -> pts ~6500 (A), novice ~3.1 M with 2 continues (C)
+  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); { const o=G.NF?450:0; /* FABLE: stage 5 scores ~450 k more (denser finale) */ rank=pts>7000+o?'S':pts>5800+o?'A':pts>4400+o?'B':pts>2800+o?'C':'D'; } // C3 scale (stages 1-4 + SUNFALL): average clean clear ~5.4 M -> pts ~6500 (A), novice ~3.1 M with 2 continues (C)
     if(G.demo){ toTitle(); return; }
     if(cleared) exUnlock('inf'); else exUnlock('slow'); if(eoN>=4) exUnlock('tiny');
     lastResult={score,pct,eoN,cont:G.contUsed||0,cleared,rank,attack:G.attack,ex:G.exUsed,s5:G.s5||0,s5stars:G.s5stars||0}; G.mode='results'; screen='results'; scrT=0; A.music(cleared?'credits':null); }
@@ -286,7 +295,7 @@
     const x=H.ctx(), {W,H:Hh,sc}=H.size(), txt=H.txt, st=H.strokeTxt, C=H.C, F=H.F; HITS.length=0; const TT=touch.on; H.touch=TT;
     if(TT){ const pi=G.promptInfo&&G.promptInfo(); for(const [id,b] of [['accel','boost'],['brake','brake']]){ const el=ui0.querySelector('[data-b="'+b+'"]'); const on=!!(pi&&pi.id===id); if(el&&el.classList.contains('cue')!==on) el.classList.toggle('cue',on); } }
     if(TT&&touch.thrK&&G.P){ const K=G.K, v=(G.P.thr-K.thrMin)/(K.thrMax-K.thrMin); if(touch.thr==null) touch.thrV=v; const hh=touch.thrEl.clientHeight; touch.thrK.style.bottom=(4+v*(hh-36))+'px'; touch.thrN.style.bottom=(18+((1-K.thrMin)/(K.thrMax-K.thrMin))*(hh-36))+'px'; }
-    const ui=document.getElementById('touch'); const md=(screen==='play'&&!G.paused&&G.mode==='play')?(['branch','continue','dead','gameover','ending','clear','orbit'].includes(G.ph)?'wait':'play'):'menu'; if(ui.dataset.mode!==md) ui.dataset.mode=md; if(TT&&G.P){ const cb=ui.querySelector('[data-b="clx"]'); const rd=G.P.climax>=1||G.P.climaxT>0; if(cb.classList.contains('ready')!==rd) cb.classList.toggle('ready',rd); }
+    const ui=document.getElementById('touch'); const md=(screen==='play'&&!G.paused&&G.mode==='play')?(['branch','continue','dead','gameover','ending','clear','orbit'].includes(G.ph)?'wait':'play'):'menu'; if(ui.dataset.mode!==md) ui.dataset.mode=md; if(TT&&G.P){ const cb=ui.querySelector('[data-b="clx"]'); { const kk=Math.round((G.P.climaxT>0?1:G.P.climax)*36)/36; if(cb._k!==kk){ cb._k=kk; cb.style.setProperty('--k',kk); } } const rd=G.P.climax>=1||G.P.climaxT>0; if(cb.classList.contains('ready')!==rd) cb.classList.toggle('ready',rd); }
     const logo=(y,s)=>{ x.save(); x.font=(86*sc*s|0)+'px '+F.disp; x.textAlign='center'; x.textBaseline='middle'; x.shadowColor=C.pink; x.shadowBlur=24*sc; x.fillStyle='#fff'; x.fillText('VECTOR',W/2,y); x.shadowColor=C.cyan; x.fillStyle=C.pink; x.font=(108*sc*s|0)+'px '+F.disp; x.fillText('CLIMAX',W/2,y+90*sc*s); x.shadowColor=C.pink; x.fillStyle=C.cyan; x.font=(58*sc*s|0)+'px '+F.disp; x.fillText('S T R I K E',W/2,y+164*sc*s); x.restore(); txt('A  VECTOR  BLAZE  STORY',W/2,y+210*sc*s,15,C.yel,'center'); };
     if(screen==='boot'&&PEND&&!PEND.single){ x.fillStyle='rgba(0,0,0,.6)'; x.fillRect(0,0,W,Hh); st(PEND.kind==='ending'?'SUNFALL COMPLETE':'GAME OVER',W/2,Hh*0.36,44,PEND.kind==='ending'?C.cyan:C.red); txt('RUN SCORE  '+H.pad(PEND.score||0,9),W/2,Hh*0.46,18,'#fff','center',F.disp); if((scrT*2|0)%2===0) st(TT?'TAP TO CONTINUE':'PRESS START',W/2,Hh*0.66,28,'#fff'); return; }
     if(screen==='boot'){ x.fillStyle='rgba(0,0,0,.55)'; x.fillRect(0,0,W,Hh); logo(Hh*0.28,1); if((scrT*2|0)%2===0) st(TT?'TAP TO START':'PRESS START',W/2,Hh*0.72,30,'#fff'); txt(TT?'best played with the phone sideways':'keyboard / gamepad / touch',W/2,Hh*0.8,13,C.dim,'center'); return; }
