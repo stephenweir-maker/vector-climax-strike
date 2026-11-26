@@ -210,7 +210,7 @@
   G.bossIn=function(n){ if(n===2) G.setEnv(Object.assign({},ENV.canyon,{xMax:80,yMax:92,yMin:9}),false); /* the furnace carrier needs the open canyon, not the low cut */ G.ph='bossWarn'; G.phT=0; A.sfx.warn(); A.music(null); G.noProps=false; G.say.apply(null,BOSSLINES[n].concat([3.4])); };
   G.startStage=function(n){
     const st=STG[n-1]; G.LATER.length=0; G.stage=n; G.stDef=st; G.st=0; G.evI=0; G.stageScore=0; G.stKills=0; G.stSpawned=0; G.EO=null; G.eoMsg=null; G.bossKilled=false; G.bossDoneT=0; G.spotted=0; G.stDmg=0; G.stCont=0; G._swarmed=0; G.tip=null; G.stScore0=G.score; G.stArmor0=G.P.armor; G.stKills0=G.kills; G.stSpawned0=G.spawned;
-    G.clearAll(); G._propD=0; G._cloD=0; G.diff=[1,0.7,1,1.25,1.5][n]||1;
+    G.clearAll(); G._propD=0; G._cloD=0; G.diff=[1,0.7,1,1.25,1.5][n]||1; G._teachSaid=0; G.dodgeTip=0; G.breath=0; G.breathI=0; G.breathN=0; G.sinceBreath=0; G._lastWaveT=-99; G._cloudPass=0;
     G.trenchClear&&G.trenchClear(); G.bridge=null; G.laneX=null; G.laneY1=null; G.pr=null; G.objective=null; G.banner=null; G.thrSum=0; G.thrN=0; G.wingKills=0; G.wingBoltsClear&&G.wingBoltsClear(); G.camSnap('abc'); G.forceThr=null; G.cardT=0; G._noSwarm=0;
     if(G.wingSpawn) G.wingSpawn();
     let env=st.env; if(n===3&&G.route==='low') env='docksLow'; G.setEnv(ENV[env],false);
@@ -229,8 +229,22 @@
   }
   // the first time the CLIMAX gauge fills in a stretch, a dart swarm is sent in so there is always a sky full of targets to spend it on
   function swarmTick(){ const P=G.P, rd=P.climax>=1&&P.climaxT<=0; const ev=G.stDef.ev, end=ev[ev.length-1][0];
-    if(rd&&!G._swarmed&&G.st>6&&G.st<end-7&&!(G.trench&&!G.trench.done)&&!G._noSwarm){ G._swarmed=1; S.darts(12,{count:false}); if(!G._clxSaid){ G._clxSaid=1; G.say('VEGA','CLIMAX is charged and a swarm is coming in. Hit CLIMAX and lock the lot!',2.8); } }
+    if(rd&&!G._swarmed&&!(G.breath>0)&&G.st>6&&G.st<end-7&&!(G.trench&&!G.trench.done)&&!G._noSwarm){ G._swarmed=1; S.darts(G.PACE?8:12,{count:false}); if(!G._clxSaid){ G._clxSaid=1; G.say('VEGA','CLIMAX is charged and a swarm is coming in. Hit CLIMAX and lock the lot!',2.8); } }
     if(!rd&&P.climaxT<=0) G._swarmed=0; }
+  // BREATHERS (owner, 26 Nov): every 15-20 s the sky clears for about 4 s - nothing spawns, nothing shoots, the drones still in front of you
+  // peel away, a bank of cloud rolls past and the squadron talks. The stage script waits (marks are stage-clock seconds); the last mark of
+  // stage 1 is the calm before its boss (stages 2-4 get that calm from their tight-run exit).
+  const BREATH={1:[13,28.6,44.6,60,79.6],2:[12,27.4,44,62],3:[12,27.4,44,62],4:[12.4,27.4,44,62]};
+  const BLINES=[['JUNO','Sky is clear. Breathe, Seven.'],['BRICK','Nice shooting. Check your six and settle.'],['JUNO','Regroup on me - more of them past that cloud.'],['BRICK','Quiet for a second. I do not trust it.'],['JUNO','Good hits. Line up for the next lot.']];
+  function breatheTick(dt){ if(!G.PACE) return false; if(G.breath>0){ G.breath-=dt; if(G.breath<=0){ G.breath=0; G.sinceBreath=0; } if(G.breath<1.9&&!G._brOpen){ G._brOpen=1; G._lastWaveT=-99; } /* the next wave may set off from far away for the last 2 s (it arrives as the breather ends); nothing fires until it is over */ return G.breath>=1.9; }
+    G.sinceBreath=(G.sinceBreath||0)+dt; const m=BREATH[G.stage]||[]; const i=G.breathI||0;
+    if(i<m.length&&G.st>=m[i]){ G.breathI=i+1; if(G.EO&&!G.EO.done&&G.EO.survive) return false; /* not across the searchlight run: that order is its own quiet beat */
+      G._brOpen=0; G.breath=G.trench&&!G.trench.done?3:4; G.breathN=(G.breathN||0)+1; G._cloudPass=G.trench&&!G.trench.done?0:6;
+      for(const e of G.ENS){ if(!e.dead&&!e.boss&&!e.ground&&!e.eo&&!e.big&&!e.save&&!e.teach&&e.ai!==G.AI.leave&&e.ai!==G.AI.chase){ e.ai=G.AI.leave; e.lockable=false; e.noHit=1; e.noFire=1; e.tellK=0; e.bx=(e.x>G.P.x?1:-1)*(80+Math.random()*50); if(e.count!==false){ G.spawned=Math.max(0,G.spawned-1); G.stSpawned=Math.max(0,G.stSpawned-1); } } }
+      G.clearLocks&&G.clearLocks();
+      if(!G.radioCur&&!(G.radioQ&&G.radioQ.length)){ const L=BLINES[(G.breathN+G.stage)%BLINES.length]; G.say(L[0],L[1],2.4); }
+      return true; }
+    return false; }
   // controls taught by doing: one short prompt at a time, only until the player has done the thing once (then never again)
   function tutTick(){ const T=G.tut; G.tip=null; if(!T||G.demo||G.bot) return; const P=G.P, K=G.K; let tip=null;
     if(!T.lock){ if(P.locks.length) T.lock=1; else if(G.ENS.some(e=>!e.dead&&e.lockable&&e.z>K.lockZ[0]&&e.z<-60)) tip='lock'; }
@@ -266,7 +280,7 @@
       for(const w of G.WING||[]){ if(!w.deck) continue; const dz=(G.carrier?G.carrier.z:G._carZ0)-G._carZ0; w.z=w.deck.z+dz; w.x=w.deck.x; w.y=14.6; w.obj.position.set(w.x,w.y,w.z);
         if((G._launchT!=null&&t-G._launchT>w.deck.dt)||t>w.deck.auto){ w.deck=null; w.z-=6; w.launchT=G.t; A.sfx.boost&&A.sfx.boost(); for(let i=0;i<8;i++) G.psNorm.add({x:w.x+rnd(-4,4),y:13.5,z:w.z+rnd(0,12),vx:rnd(-12,12),vy:rnd(6,16),vz:rnd(10,30),life:1,s0:2.5,s1:8,c:[0.95,0.95,1],a0:0.5,a1:0,k:2,rot:Math.random()*6,world:1}); } } }
     else if(ph==='intro'){ G.camZ=G.camZ?G.K.camBack+40*Math.max(0,1-G.phT/1.2):0; if(G.phT>1.2){ G.ph='fly'; G.camZ=0; } }
-    else if(ph==='fly'){ const ck=G.clockK?G.clockK():1; G.st+=dt*ck; swarmTick(); tutTick(); bridgeTick(); for(let i=G.LATER.length-1;i>=0;i--){ const L=G.LATER[i]; L.t-=dt*ck; if(L.t<=0){ G.LATER.splice(i,1); try{ L.fn(); }catch(e){ console.error(e); } } } const ev=G.stDef.ev; while(G.evI<ev.length&&ev[G.evI][0]<=G.st){ const f=ev[G.evI][1]; G.evI++; try{ f(); }catch(e){ console.error(e); } } eoTick(dt); }
+    else if(ph==='fly'){ const ck=G.clockK?G.clockK():1; if(!breatheTick(dt)) G.st+=dt*ck; /* the stage script holds its place during a breather */ swarmTick(); tutTick(); bridgeTick(); for(let i=G.LATER.length-1;i>=0;i--){ const L=G.LATER[i]; L.t-=dt*ck; if(L.t<=0){ G.LATER.splice(i,1); try{ L.fn(); }catch(e){ console.error(e); } } } const ev=G.stDef.ev; while(G.evI<ev.length&&ev[G.evI][0]<=G.st){ const f=ev[G.evI][1]; G.evI++; try{ f(); }catch(e){ console.error(e); } } eoTick(dt); }
     else if(ph==='bossWarn'){ if(G.phT>3.2){ G.ph='boss'; G.phT=0; G.startBoss(G.stage); A.music(G.stage===4?'final':'boss'+G.stage); } eoTick(dt); }
     else if(ph==='boss'){ tutTick(); eoTick(dt); if(G.bossDoneT>0){ G.bossDoneT-=rdt; if(G.bossDoneT<=0){ stageClear(); } } }
     else if(ph==='clear'){ if(G.phT>5.5){ if(G.stage===4){ G.orbitStart(); } else if(G.stage===2){ G.ph='branch'; G.phT=0; G.branchSel=1; A.sfx.order(); } else { G.ph='trans'; G.phT=0; } } }
@@ -312,6 +326,6 @@
   G.stageClearDebug=stageClear;
   // pause menu: fly the current stage again from its start (score, armour and kill counts go back to what they were)
   G.retryStage=function(){ const P=G.P, n=G.stage; if(!n) return; G.score=G.stScore0||0; G.kills=G.stKills0||0; G.spawned=G.stSpawned0||0; P.dead=false; P.deadT=0; P.armor=G.stArmor0||100; P.climax=0; P.climaxT=0; P.inv=0; P.hurtT=0; P.rollT=0; P.spin=0; P.speed=1;
-    G.climaxFx=0; G.slowmo=0; G.whiteK=0; G._tdone=0; G._teachSaid=0; G.dodgeTip=0; G.flashW=0; G.flashR=0; G.shake=0; G.combo=0; G.radioQ.length=0; G.radioCur=null; G.areaBanner=null; G.player.visible=true; A.climaxCancel&&A.climaxCancel();
+    G.climaxFx=0; G.slowmo=0; G.whiteK=0; G._tdone=0; G._teachSaid=0; G.dodgeTip=0; G.breath=0; G.breathI=0; G.breathN=0; G.sinceBreath=0; G._lastWaveT=-99; G._cloudPass=0; G.flashW=0; G.flashR=0; G.shake=0; G.combo=0; G.radioQ.length=0; G.radioCur=null; G.areaBanner=null; G.player.visible=true; A.climaxCancel&&A.climaxCancel();
     G._retry=1; G.startStage(n); G._retry=0; };
 })();

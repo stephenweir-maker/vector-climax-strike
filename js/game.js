@@ -294,7 +294,7 @@
       const x=e.x,y=e.y,z=e.z; G.shake=Math.max(G.shake||0,9); G.pops.push({x,y:y+8,z,t:-0.6,txt:(e.name||'PART')+' DESTROYED',c:'#ffd23a',big:1});
       G.after(0.18,()=>{ boom(x+rnd(-6,6),y+rnd(-3,5),z,9,COL.yellow,0); A.sfx.boom(false); });
       for(let i=0;i<5;i++) psNorm.add({x,y,z,vx:rnd(-40,40),vy:rnd(10,50),vz:rnd(40,120),life:2.2,s0:rnd(1.6,2.6),s1:1.2,c:COL.gun,solid:1,rot:Math.random()*6,vr:rnd(-6,6),g:70,drag:0.7,floor:0.5,world:0}); }
-    if(G.P.climaxT<=0) G.P.climax=Math.min(1,G.P.climax+(e.climax||0.04)*(G.ex&&G.ex.gauge?2:1));
+    if(G.P.climaxT<=0) G.P.climax=Math.min(1,G.P.climax+(e.climax||0.04)*(PACE?1.7:1)*(G.ex&&G.ex.gauge?2:1));
     if(e.onKill) e.onKill(e);
     if(G.tel) G.tel('kill',e,src);
     if(e.obj&&!e.boss){ scene.remove(e.obj); } else if(e.obj&&e.boss){ e.obj.visible=false; }
@@ -387,7 +387,7 @@
   // fast from far, cruise through the kill zone, then hang close and big (z -230..-110) for about 1.5 s before breaking past
   function apprV(e){ return e.z<(e.zIn||(NF?-450:-540))?(e.fast||440):e.z<-230?(e.app||115):Math.min(e.app||115,78); }
   // a shot is always announced: the muzzle glows for 0.45 s before it leaves
-  function fireTell(e,dt,inRange){ if(e.noFire||!(e.fireT<90)){ e.tellK=0; return false; } if(!inRange){ if(e.tellK>0&&NF){ /* left the firing window mid-tell: stand down */ e.tellK=0; e.fireT=Math.max(e.fireT,K.tellT); } return false; }
+  function fireTell(e,dt,inRange){ if(e.noFire||!(e.fireT<90)){ e.tellK=0; return false; } if(G.breath>0&&!e.boss){ e.tellK=0; if(e.fireT<(K.tellT||0.45)+0.4) e.fireT=(K.tellT||0.45)+0.4; return false; } /* breather: nothing shoots */ if(!inRange){ if(e.tellK>0&&NF){ /* left the firing window mid-tell: stand down */ e.tellK=0; e.fireT=Math.max(e.fireT,K.tellT); } return false; }
     const T=K.tellT||0.45; if(NF&&!e._tl){ e._tl=1; if(e.fireT<T) e.fireT=T; /* the full tell is always shown, however late the shooter arrived */ }
     const was=e.fireT; e.fireT-=dt;
     if(e.fireT<T){ if(was>=T&&NF&&!e.boss&&e.z>-700){ A.sfx.charge&&A.sfx.charge(); if(e.teach&&!G._teachSaid){ G._teachSaid=1; G.dodgeTip=2.6; G.say('JUNO','That one is charging up - slide out of its line!',2.2); } }
@@ -398,6 +398,8 @@
     for(let i=-1;i<=1;i++){ const dx=tx+i*26-e.x, dy=ty-e.y, dz=-e.z, L=Math.hypot(dx,dy,dz)||1; SHOTS.push({isShot:1,kind:'orb',x:e.x,y:e.y,z:e.z,vx:dx/L*spd,vy:dy/L*spd,vz:dz/L*spd,t:0,life:4,r:2.4,dmg:K.dmg.orb,grp}); } }
   G.fan=fan;
   const AI = G.AI = {
+    // breather: whatever is still in front of you peels up and away (not a kill, not a miss - it no longer counts for the destruction rate)
+    leave(e,dt){ e.brk=1; e.vz=Math.min(460,e.vz+1100*dt); e.vx=lerp(e.vx,e.bx||90,1-Math.exp(-5*dt)); e.vy=lerp(e.vy,70,1-Math.exp(-4*dt)); e.bank=-e.vx/150; },
     // head-on attackers: rush in, cruise through the kill zone, some fire once, break away past the player
     head(e,dt){ if(!e._in){ e._in=1; e.ph=e.ph||rnd(0,6); }
       if(!e.brk){ e.vz=apprV(e); e.vx=Math.sin(e.t*(e.wf||1.4)+e.ph)*(e.wx||12)+(e.cx||0); e.vy=Math.cos(e.t*1.1+e.ph)*(e.wy||5); e.bank=-e.vx/80;
@@ -449,19 +451,26 @@
   // how many of a wave shoot, and how often the hunters fire, rises stage by stage (G.diff: 0.7, 1, 1.25, 1.5)
   // FABLE: every wave has ONE clear shooter (its leader, p >= 0.7: always fires); the others join in more often stage by stage
   const fT=(o,p)=>NF?((o.noFire||(!((p==null?0.35:p)>=0.7)&&Math.random()>(p==null?0.35:p)*0.6*(G.diff||1)))?99:rnd(0.8,1.5)):((o.noFire||Math.random()>(p==null?0.35:p)*(G.diff||1))?99:rnd(0.3,1.6));
-  SPAWN.vee = (n,o)=>{ o=o||{}; const cx=o.x!=null?o.x:rnd(-30,30), cy=o.y!=null?o.y:rnd(28,52); for(let i=0;i<n;i++){ const k=Math.ceil(i/2)*(i%2?1:-1); addEnemy(DR({x:cx+k*14,y:cy+Math.abs(k)*3,z:-1300-Math.abs(k)*55,wx:o.wx||8,gun:o.gun,fireT:i===0?fT(o,o.fire!=null?o.fire:0.7):fT(o,0.2)})); } };
-  SPAWN.line = (n,o)=>{ o=o||{}; const y=o.y||rnd(25,55); for(let i=0;i<n;i++){ addEnemy(DR({x:(o.x||0)+(i-(n-1)/2)*17,y:y,z:-1280,wx:4,wy:2,fireT:fT(o,i===(n>>1)?0.7:0.25)})); } };
-  SPAWN.column = (n,o)=>{ o=o||{}; const x=o.x!=null?o.x:rnd(-35,35), y=o.y||rnd(28,52), ph=rnd(0,6); for(let i=0;i<n;i++){ addEnemy(DR({x:x,y:y,z:-1280-i*58,wx:16,wy:7,wf:1.1,ph:ph+i*0.5,fireT:i===n-1?fT(o,0.8):99})); } };
-  SPAWN.cross = (n,o)=>{ o=o||{}; const dir=o.dir||(Math.random()<0.5?1:-1); for(let i=0;i<n;i++){ addEnemy(DR({x:-dir*(150+i*24),y:(o.y||40)+i*2,z:-(o.z||470)-i*18,ai:AI.cross,dir,app:o.app,fireT:i%3===1?rnd(0.9,2.2):99})); } };
-  SPAWN.pincer = (n,o)=>{ o=o||{}; const h=Math.ceil(n/2); SPAWN.cross(h,{dir:1,y:(o.y||34),z:o.z||440}); SPAWN.cross(n-h,{dir:-1,y:(o.y||34)+16,z:(o.z||440)+60}); };
-  SPAWN.swirl = (n,o)=>{ o=o||{}; for(let i=0;i<n;i++){ addEnemy(DR({x:0,y:o.y||40,z:-1300-i*52,ai:AI.swirl,a0:i*0.8,cx:o.x||0,cy:o.y||40,fireT:i%4===0?rnd(0.5,1.4):99})); } };
+  // PACING (owner, 26 Nov: "way too many enemies and no break"): waves are tight formations of 3-5, never more than ~6 live air enemies, a new
+  // wave no sooner than ~4 s after the last attack, and nothing spawns during a breather (G.breath, see stages.js). ?pace=0 = the dense build.
+  const PACE = G.PACE = NF && !/[?&]pace=0/.test(location.search);
+  G.liveAir=function(){ let n=0; for(const e of ENS){ if(!e.dead&&!e.boss&&!e.ground&&!e.brk&&e.z<40) n++; } return n; };
+  function gate(n,o){ if(!PACE||G.mode!=='play'||(o&&o.force)) return n; if(o&&o.count===false){ G._lastWaveT=G.t; return Math.max(4,Math.min(n,8-G.liveAir())); } /* the CLIMAX swarm is a set piece */
+    if(G.breath>=1.9) return 0; if(G.t-(G._lastWaveT||-99)<3.2) return 0; const room=6-G.liveAir(); n=Math.min(5,n,room); if(n<3) return 0; G._lastWaveT=G.t; return n; }
+  const attack=()=>{ G._lastWaveT=G.t; }; // set pieces (chasers, gunship, bomber) count as the current attack: no wave piles on top of them
+  SPAWN.vee = (n,o)=>{ o=o||{}; n=gate(n,o); const cx=o.x!=null?o.x:rnd(-30,30), cy=o.y!=null?o.y:rnd(28,52); for(let i=0;i<n;i++){ const k=Math.ceil(i/2)*(i%2?1:-1); addEnemy(DR({x:cx+k*14,y:cy+Math.abs(k)*3,z:-1300-Math.abs(k)*55,wx:o.wx||8,gun:o.gun,fireT:i===0?fT(o,o.fire!=null?o.fire:0.7):fT(o,0.2)})); } };
+  SPAWN.line = (n,o)=>{ o=o||{}; n=gate(n,o); const y=o.y||rnd(25,55); for(let i=0;i<n;i++){ addEnemy(DR({x:(o.x||0)+(i-(n-1)/2)*17,y:y,z:-1280,wx:4,wy:2,fireT:fT(o,i===(n>>1)?0.7:0.25)})); } };
+  SPAWN.column = (n,o)=>{ o=o||{}; n=gate(n,o); const x=o.x!=null?o.x:rnd(-35,35), y=o.y||rnd(28,52), ph=rnd(0,6); for(let i=0;i<n;i++){ addEnemy(DR({x:x,y:y,z:-1280-i*58,wx:16,wy:7,wf:1.1,ph:ph+i*0.5,fireT:i===n-1?fT(o,0.8):99})); } };
+  SPAWN.cross = (n,o)=>{ o=o||{}; n=gate(n,o); const dir=o.dir||(Math.random()<0.5?1:-1); for(let i=0;i<n;i++){ addEnemy(DR({x:-dir*(150+i*24),y:(o.y||40)+i*2,z:-(o.z||470)-i*18,ai:AI.cross,dir,app:o.app,fireT:i%3===1?rnd(0.9,2.2):99})); } };
+  SPAWN.pincer = (n,o)=>{ o=o||{}; n=gate(n,o); if(PACE&&n<4&&n>0) n=4; if(!n) return; const h=Math.ceil(n/2); SPAWN.cross(h,{dir:1,y:(o.y||34),z:o.z||440,force:1}); SPAWN.cross(n-h,{dir:-1,y:(o.y||34)+16,z:(o.z||440)+60,force:1}); };
+  SPAWN.swirl = (n,o)=>{ o=o||{}; n=gate(n,o); for(let i=0;i<n;i++){ addEnemy(DR({x:0,y:o.y||40,z:-1300-i*52,ai:AI.swirl,a0:i*0.8,cx:o.x||0,cy:o.y||40,fireT:i%4===0?rnd(0.5,1.4):99})); } };
   // the lone shooter that teaches the dodge (stage 1, about 6 s in): slow, alone, long tell
   SPAWN.shooter = (o)=>{ o=o||{}; return addEnemy(DR({x:o.x||0,y:o.y||42,z:-1300,wx:3,wy:1,app:62,teach:o.teach?1:0,hp:o.teach?40:6,/* armoured until it has fired its one lesson */ fireT:o.t||0.75})); };
-  SPAWN.chase = (n,o)=>{ o=o||{}; G.warnBehind=2.4; A.sfx.alarm(); for(let i=0;i<n;i++){ const s=o.xs?o.xs[i%o.xs.length]:(i%2?1:-1)*(10+i*14); addEnemy(DR({abs:o.xs?1:0,x:s,y:o.y0!=null?o.y0:-20,z:90+i*30,ai:AI.chase,tx:o.xs?s:s*1.4,ty:(o.y||42)+(i%3)*(o.dy!=null?o.dy:8),tz:-185-i*18,hold:rnd(5,7),fireT:rnd(1.0,2.6),hp:5})); } };
+  SPAWN.chase = (n,o)=>{ o=o||{}; if(PACE){ n=Math.min(n,3); attack(); } G.warnBehind=2.4; A.sfx.alarm(); for(let i=0;i<n;i++){ const s=o.xs?o.xs[i%o.xs.length]:(i%2?1:-1)*(10+i*14); addEnemy(DR({abs:o.xs?1:0,x:s,y:o.y0!=null?o.y0:-20,z:90+i*30,ai:AI.chase,tx:o.xs?s:s*1.4,ty:(o.y||42)+(i%3)*(o.dy!=null?o.dy:8),tz:-185-i*18,hold:rnd(5,7),fireT:rnd(1.0,2.6),hp:5})); } };
   // darts: small cyan swarm drones, one vulcan burst or one missile each
-  SPAWN.darts = (n,o)=>{ o=o||{}; const cx=o.x||0, cy=o.y||42, sp=o.spread||60; for(let i=0;i<n;i++){ addEnemy({obj:mdl('dart'),ai:AI.dart,x:cx+rnd(-sp,sp),y:clamp(cy+rnd(-sp*0.4,sp*0.4),14,80),z:-(o.z||1300)-rnd(0,o.depth||260),fast:o.fast,zIn:o.zIn,app:o.app||105,hp:1,r:5.5,pts:400,climax:0.008,fireT:99,dart:1,count:o.count,boomCol:COL.cyan}); } };
-  SPAWN.gunship = (o)=>{ o=o||{}; return addEnemy({obj:mdl('gunship'),x:o.x||0,hx:o.x||0,y:o.y||50,z:-1300,ai:AI.gunship,ty:o.y||50,hp:o.hp||44,r:11,pts:5000,lockNeed:4,big:1,climax:0.1,hold:o.hold||9,fireT:1.6}); };
-  SPAWN.bomber = (o)=>{ o=o||{}; const dir=o.dir||(Math.random()<0.5?1:-1), y=o.y||56; const e=addEnemy({obj:mdl('bomber'),x:-dir*190,y,z:-(o.z||400),ai:AI.bomber,dir,hp:o.hp||30,r:12,pts:4000,lockNeed:3,big:1,climax:0.08,fireT:rnd(1.6,2.2),boomCol:COL.orange});
+  SPAWN.darts = (n,o)=>{ o=o||{}; n=gate(n,o); const cx=o.x||0, cy=o.y||42, sp=o.spread||60; for(let i=0;i<n;i++){ addEnemy({obj:mdl('dart'),ai:AI.dart,x:cx+rnd(-sp,sp),y:clamp(cy+rnd(-sp*0.4,sp*0.4),14,80),z:-(o.z||1300)-rnd(0,o.depth||260),fast:o.fast,zIn:o.zIn,app:o.app||105,hp:1,r:5.5,pts:400,climax:0.008,fireT:99,dart:1,count:o.count,boomCol:COL.cyan}); } };
+  SPAWN.gunship = (o)=>{ o=o||{}; attack(); return addEnemy({obj:mdl('gunship'),x:o.x||0,hx:o.x||0,y:o.y||50,z:-1300,ai:AI.gunship,ty:o.y||50,hp:o.hp||44,r:11,pts:5000,lockNeed:4,big:1,climax:0.1,hold:o.hold||9,fireT:1.6}); };
+  SPAWN.bomber = (o)=>{ o=o||{}; attack(); if(PACE&&o.escort) o.escort=Math.min(2,o.escort); const dir=o.dir||(Math.random()<0.5?1:-1), y=o.y||56; const e=addEnemy({obj:mdl('bomber'),x:-dir*190,y,z:-(o.z||400),ai:AI.bomber,dir,hp:o.hp||30,r:12,pts:4000,lockNeed:3,big:1,climax:0.08,fireT:rnd(1.6,2.2),boomCol:COL.orange});
     for(let i=0;i<(o.escort||0);i++) addEnemy({obj:mdl('dart'),ai:AI.cross,dir,spd:46,app:26,x:-dir*(190+(i%2?16:-16)),y:y+(i<2?-10:10),z:-(o.z||400)+(i%2?-22:22),hp:1,r:5.5,pts:400,climax:0.008,fireT:99,dart:1,boomCol:COL.cyan}); return e; };
   SPAWN.ground = (n,o)=>{ o=o||{}; const k=o.kind||'turret'; for(let i=0;i<n;i++){ const side=o.side||(i%2?1:-1); const x=o.xs?o.xs[i]:side*rnd(o.xMin||15,o.xMax||70); addEnemy({obj:mdl(k),x,y:k==='boat'?0.4:0,z:-(o.z||1500)-i*(o.gap||140),ai:AI.ground,ground:1,face:false,r:k==='boat'?8:6,hp:k==='boat'?6:4,pts:k==='boat'?1500:800,gun:o.gun||(k==='boat'&&i%2?'missile':'orb'),yaw:k==='boat'?(o.yaw||0):0,gvx:o.gvx||0,lockNeed:1,count:true,slow:o.slow,fireT:i%2?99:rnd(0.6,1.6)}); } };
   SPAWN.missiles = (n,o)=>{ o=o||{}; for(let i=0;i<n;i++){ const fake={x:rnd(-60,60),y:rnd(30,60),z:-900-i*60}; shoot(fake,'missile',320); } };
@@ -475,6 +484,7 @@
       if(pr.z>120){ scene.remove(pr.obj); if(pr.beam) scene.remove(pr.beam); PROPS.splice(i,1); }
     }
     for(let i=CLOUDS.length-1;i>=0;i--){ const c=CLOUDS[i]; c.z+=W*(c.par||1); c.obj.position.z=c.z; c.obj.quaternion.copy(cam.quaternion); if(c.op0==null) c.op0=c.obj.material.opacity; const cd=Math.hypot(c.obj.position.x-cam.position.x,c.obj.position.y-cam.position.y,c.z-cam.position.z); c.obj.material.opacity=c.op0*Math.min(1,Math.max(0,(cd-60)/260)); if(c.z>60){ scene.remove(c.obj); c.obj.geometry.dispose(); c.obj.material.dispose(); CLOUDS.splice(i,1); } }
+    if(G._cloudPass>0&&env.clouds){ G._cloudPass--; const cl=env.clouds, cw=rnd(260,420); const o=M.cloud(cw,cw*rnd(0.4,0.5),Math.min(0.9,cl.op)); o.material.color.set(cl.col||'#ffffff'); const side=G._cloudPass%2?-1:1; const c={obj:o,z:-1500-G._cloudPass*170,par:cl.par||1}; o.position.set(side*rnd(60,190),rnd(Math.max(30,cl.y[0]*0.6),cl.y[0]+60),c.z); scene.add(o); CLOUDS.push(c); } /* breather: a bank of cloud rolls past close by */
     if(env.clouds && !G.noProps){ G._cloD=(G._cloD||0)+W; while(G._cloD>=env.clouds.every){ G._cloD-=env.clouds.every; const cl=env.clouds; const cw=rnd(cl.w[0],cl.w[1]); const o=M.cloud(cw,cw*rnd(0.38,0.5),cl.op); o.material.color.set(cl.col||'#ffffff'); const side=Math.random()<0.5?-1:1; const x=cl.mid?rnd(-160,160):side*rnd(cl.x[0],cl.x[1]); const c={obj:o,z:-2100,par:cl.par||1}; o.position.set(x,rnd(cl.y[0],cl.y[1]),c.z); scene.add(o); CLOUDS.push(c); } }
   }
   // props are cloned from a small pool of variants per kind (shared geometry: no per-spawn GPU allocations, nothing to leak)

@@ -14,7 +14,8 @@
   /* ---------------- ranking ---------------- */
   // C2 rescale (whole run, stages 1-4 + the bridge): bot runs score novice ~2.6 M (2 continues), average ~4.7 M, expert ~5-6 M
   const DEFRANK=[['SVN',7400000,'S'],['VGA',6600000,'S'],['W7 ',6000000,'A'],['JNO',5400000,'A'],['BRK',4800000,'B'],['MSH',4100000,'B'],['REX',3400000,'C'],['SOV',2700000,'C'],['HLC',1800000,'D'],['ZER',900000,'D']];
-  let RANK=store.get('vcx_rank3',null)||DEFRANK.map(r=>({n:r[0],s:r[1],g:r[2],a:0}));
+  const RKEY=G.PACE?'vcx_rank4':'vcx_rank3'; // pacing pass: about half as many enemies, so scores are ~30 % lower - a fresh table with scaled default entries
+  let RANK=store.get(RKEY,null)||DEFRANK.map(r=>({n:r[0],s:G.PACE?Math.round(r[1]*0.7/10000)*10000:r[1],g:r[2],a:0}));
   /* ---------------- EX OPTIONS: earned by playing, like ABC. Gameplay ones mark the run "EX" and keep it off the ranking ---------------- */
   const EXL=[
     {id:'stock',name:'MISSILE STOCK 12',hint:'Clear stage 1',game:1},
@@ -231,13 +232,13 @@
   G.onGameOver=function(){ A.sfx.gameover(); setTimeout(()=>{ finish(false); },1500); };
   G.onEnding=function(){ startEnding(); };
   G.onBridgeDone=function(){ G.onStageCleared(4); if(G.demo){ toTitle(); return; } if(G.bot||Q.get('nos5')==='1'){ finish(true); return; } toStage5(runOut()); }; // on to stage 5 SUNFALL (its own page)
-  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); { const o=G.NF?450:0; /* FABLE: stage 5 scores ~450 k more (denser finale) */ rank=pts>7000+o?'S':pts>5800+o?'A':pts>4400+o?'B':pts>2800+o?'C':'D'; } // C3 scale (stages 1-4 + SUNFALL): average clean clear ~5.4 M -> pts ~6500 (A), novice ~3.1 M with 2 continues (C)
+  function finish(cleared){ const eoN=G.eo.filter(v=>v===true).length; const pct=G.spawned?G.kills/G.spawned:0; const score=G.score; let rank='D'; const pts=score/1000+pct*400+eoN*150-(G.contUsed||0)*300+(cleared?300:0); { const o=G.PACE?0:(G.NF?450:0), k=G.PACE?0.78:1; /* pacing pass: fewer enemies -> an average clean run is ~4.0 M (pts ~5100 = A) */ rank=pts>(7000+o)*k?'S':pts>(5800+o)*k?'A':pts>(4400+o)*k?'B':pts>(2800+o)*k?'C':'D'; } // C3 scale (stages 1-4 + SUNFALL): average clean clear ~5.4 M -> pts ~6500 (A), novice ~3.1 M with 2 continues (C)
     if(G.demo){ toTitle(); return; }
     if(cleared) exUnlock('inf'); else exUnlock('slow'); if(eoN>=4) exUnlock('tiny');
     lastResult={score,pct,eoN,cont:G.contUsed||0,cleared,rank,attack:G.attack,ex:G.exUsed,s5:G.s5||0,s5stars:G.s5stars||0}; G.mode='results'; screen='results'; scrT=0; A.music(cleared?'credits':null); }
   function qualifies(s){ return !lastResult.ex && s>RANK[RANK.length-1].s; }
   function startEntry(){ entry={c:[0,0,0],i:0}; screen='entry'; scrT=0; }
-  function finishEntry(){ const n=entry.c.map(i=>ALPH[i]).join(''); RANK.push({n,s:lastResult.score,g:lastResult.rank,a:lastResult.attack?1:0,me:1}); RANK.sort((a,b)=>b.s-a.s); RANK=RANK.slice(0,10); store.set('vcx_rank3',RANK.map(r=>({n:r.n,s:r.s,g:r.g,a:r.a}))); go('ranking'); }
+  function finishEntry(){ const n=entry.c.map(i=>ALPH[i]).join(''); RANK.push({n,s:lastResult.score,g:lastResult.rank,a:lastResult.attack?1:0,me:1}); RANK.sort((a,b)=>b.s-a.s); RANK=RANK.slice(0,10); store.set(RKEY,RANK.map(r=>({n:r.n,s:r.s,g:r.g,a:r.a}))); go('ranking'); }
   /* ---------------- ending ---------------- */
   // the ending after stage 5 SUNFALL: radio lines over a dawn flight home, then the credits roll, then the whole-run results
   function startEnding(){
