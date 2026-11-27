@@ -6,11 +6,12 @@
   const FAST=Math.max(1,Math.min(6,+(Q.get('fast')||1))); // tests only
   const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
   /* ---------------- options ---------------- */
-  const OPT=Object.assign({autoFire:false,autoMissile:false,pixel:true,shake:true,invert:false,music:8,sfx:8,flash:true,touchSize:1,voice:true,vvol:9},store.get('vcx_opt',{}));
+  const OPT=Object.assign({autoFire:false,autoMissile:false,pixel:true,shake:true,invert:false,music:8,sfx:8,flash:true,touchSize:1,voice:true,vvol:9,handling:'climax'},store.get('vcx_opt',{}));
+  { const h=Q.get('handling'); if(h==='classic'||h==='climax') OPT.handling=h; } // ?handling=classic|climax (also saved, so stage 5 gets it)
   if(OPT.mixV!==2){ if(OPT.music===7) OPT.music=8; OPT.mixV=2; }
   if(OPT.fireV!==2){ OPT.autoFire=false; OPT.fireV=2; } // v9.1: the vulcan fires only while the button is held (auto is an option again, off by default) // v8 mix: music default 8 (was 7); bumps the old default once
   window.VOICE&&VOICE.init(A);
-  function applyOpt(){ H.flashK=OPT.flash?1:0.4; try{ document.documentElement.style.setProperty('--ts',String([0.85,1,1.15][OPT.touchSize|0]||1)); }catch(e){} G.opt.autoFire=OPT.autoFire; G.opt.autoMissile=OPT.autoMissile; G.opt.shake=OPT.shake; E.pix=OPT.pixel?0.5:1; E.resize(); A.vol.music=OPT.music/10; A.vol.sfx=OPT.sfx/10; A.setVol(); window.VOICE&&VOICE.setVol(OPT.voice,OPT.vvol/10); document.body.classList.toggle('pixel',OPT.pixel); document.getElementById('gl').classList.toggle('pixel',OPT.pixel); store.set('vcx_opt',OPT); }
+  function applyOpt(){ H.flashK=OPT.flash?1:0.4; try{ document.documentElement.style.setProperty('--ts',String([0.85,1,1.15][OPT.touchSize|0]||1)); }catch(e){} G.opt.autoFire=OPT.autoFire; G.opt.autoMissile=OPT.autoMissile; G.opt.shake=OPT.shake; G.opt.handling=OPT.handling==='classic'?'classic':'climax'; E.pix=OPT.pixel?0.5:1; E.resize(); A.vol.music=OPT.music/10; A.vol.sfx=OPT.sfx/10; A.setVol(); window.VOICE&&VOICE.setVol(OPT.voice,OPT.vvol/10); document.body.classList.toggle('pixel',OPT.pixel); document.getElementById('gl').classList.toggle('pixel',OPT.pixel); store.set('vcx_opt',OPT); }
   /* ---------------- ranking ---------------- */
   // C2 rescale (whole run, stages 1-4 + the bridge): bot runs score novice ~2.6 M (2 continues), average ~4.7 M, expert ~5-6 M
   const DEFRANK=[['SVN',7400000,'S'],['VGA',6600000,'S'],['W7 ',6000000,'A'],['JNO',5400000,'A'],['BRK',4800000,'B'],['MSH',4100000,'B'],['REX',3400000,'C'],['SOV',2700000,'C'],['HLC',1800000,'D'],['ZER',900000,'D']];
@@ -189,7 +190,7 @@
   const menus={
     title:['ARCADE','STAGE SELECT','SCORE ATTACK','HOW TO PLAY','OPTIONS','EX OPTIONS','RANKING','FEEDBACK'],
     pause:['RESUME','RETRY STAGE','RESTART FROM STAGE 1','THAT FELT BAD','FEEDBACK','QUIT TO TITLE'],
-    options:['VULCAN','MISSILES','FLIGHT CONTROLS','PIXEL FILTER','SCREEN SHAKE','FLASHES','TOUCH SIZE','MUSIC','SOUND','VEGA VOICE','VOICE VOLUME','HEAD TRACKING','BACK']
+    options:['VULCAN','MISSILES','FLIGHT CONTROLS','PIXEL FILTER','SCREEN SHAKE','FLASHES','TOUCH SIZE','MUSIC','SOUND','VEGA VOICE','VOICE VOLUME','HANDLING','HEAD TRACKING','BACK']
   };
   function go(s){ screen=s; sel=0; scrT=0; if(lastMk==='back'||s==='title') A.sfx.back(); else A.sfx.menu(); }
   let lastMk='';
@@ -206,10 +207,10 @@
     if(screen==='howto'||screen==='ranking'){ if(k==='ok'||k==='back') { const w=screen; go('title'); sel=w==='howto'?3:6; } return; }
     if(screen==='options'){ const L=menus.options; if(k==='up') sel=(sel+L.length-1)%L.length, A.sfx.menu(); if(k==='down') sel=(sel+1)%L.length, A.sfx.menu();
       const dir=k==='left'?-1:k==='right'||k==='ok'?1:0;
-      if(dir){ if(sel===0) OPT.autoFire=!OPT.autoFire; if(sel===1) OPT.autoMissile=!OPT.autoMissile; if(sel===2) OPT.invert=!OPT.invert; if(sel===3) OPT.pixel=!OPT.pixel; if(sel===4) OPT.shake=!OPT.shake; if(sel===5) OPT.flash=!OPT.flash; if(sel===6) OPT.touchSize=((OPT.touchSize|0)+(dir<0?2:1))%3; if(sel===7) OPT.music=Math.max(0,Math.min(10,OPT.music+(k==='ok'?(OPT.music>=10?-10:1):dir))); if(sel===8) OPT.sfx=Math.max(0,Math.min(10,OPT.sfx+(k==='ok'?(OPT.sfx>=10?-10:1):dir))); if(sel===9) OPT.voice=!OPT.voice; if(sel===10) OPT.vvol=Math.max(0,Math.min(10,OPT.vvol+(k==='ok'?(OPT.vvol>=10?-10:1):dir))); if(sel===11&&k==='ok'){ go('head'); return; } if(sel===12&&k==='ok'){ go('title'); sel=4; return; } applyOpt(); A.sfx.menu(); }
+      if(dir){ if(sel===0) OPT.autoFire=!OPT.autoFire; if(sel===1) OPT.autoMissile=!OPT.autoMissile; if(sel===2) OPT.invert=!OPT.invert; if(sel===3) OPT.pixel=!OPT.pixel; if(sel===4) OPT.shake=!OPT.shake; if(sel===5) OPT.flash=!OPT.flash; if(sel===6) OPT.touchSize=((OPT.touchSize|0)+(dir<0?2:1))%3; if(sel===7) OPT.music=Math.max(0,Math.min(10,OPT.music+(k==='ok'?(OPT.music>=10?-10:1):dir))); if(sel===8) OPT.sfx=Math.max(0,Math.min(10,OPT.sfx+(k==='ok'?(OPT.sfx>=10?-10:1):dir))); if(sel===9) OPT.voice=!OPT.voice; if(sel===10) OPT.vvol=Math.max(0,Math.min(10,OPT.vvol+(k==='ok'?(OPT.vvol>=10?-10:1):dir))); if(sel===11) OPT.handling=OPT.handling==='classic'?'climax':'classic'; if(sel===12&&k==='ok'){ go('head'); return; } if(sel===13&&k==='ok'){ go('title'); sel=4; return; } applyOpt(); A.sfx.menu(); }
       if(k==='back'){ go('title'); sel=4; } return; }
     if(screen==='head'){ const IT=HEAD.ITEMS, n=IT.length+1; if(k==='up') sel=(sel+n-1)%n, A.sfx.menu(); if(k==='down') sel=(sel+1)%n, A.sfx.menu();
-      if(k==='back'||(k==='ok'&&sel===IT.length)){ go('options'); sel=11; return; }
+      if(k==='back'||(k==='ok'&&sel===IT.length)){ go('options'); sel=12; return; }
       const it=IT[sel]; if(it&&it.kind==='go'){ if(k==='ok'){ if(HEAD.change(it)) go('headtest'); else { A.sfx.back(); headMsgT=2.2; } } return; }
       if(it&&(k==='ok'||((k==='left'||k==='right')&&it.kind!=='act'))){ const ok=HEAD.change(it,k==='left'?-1:k==='right'?1:null); if(ok) A.sfx.menu(); else { A.sfx.back(); headMsgT=2.2; } } return; }
     if(screen==='headtest'){ if(k==='ok'||k==='back'){ go('head'); sel=HEAD.ITEMS.findIndex(i=>i.id==='test'); } return; }
@@ -326,7 +327,7 @@
         txt(un?e.name:'? ? ? ? ?',x0+10*sc,y,two?14:16,un?(on?'#fff':'#dfe6ff'):'rgba(255,255,255,.35)','left',F.disp); txt(un?(e.vals?e.vals[EXS.on[e.id]|0]:(EXS.on[e.id]?'ON':'OFF')):e.hint,x1-10*sc,y,un?(two?13:15):(two?10:12),un?(EXS.on[e.id]||e.vals?C.yel:C.dim):'rgba(255,255,255,.45)','right'); });
       const by=two?Hh*0.25+4*rowH+6:Hh*0.25+EXL.length*rowH; hit(W*0.3,by-rowH/2,W*0.4,rowH,()=>{ sel=EXL.length; menuKey('ok'); }); st('BACK',W/2,by,sel===EXL.length?24:20,sel===EXL.length?'#fff':C.dim); return; }
     if(screen==='options'){ x.fillStyle='rgba(2,4,12,.86)'; x.fillRect(0,0,W,Hh); st('OPTIONS',W/2,Hh*0.12,34,C.pink);
-      const val=[OPT.autoFire?'AUTO FIRE':'HOLD BUTTON',OPT.autoMissile?'AUTO FIRE':'BUTTON',OPT.invert?'INVERTED (UP = DIVE)':'NORMAL (UP = CLIMB)',OPT.pixel?'ON':'OFF',OPT.shake?'ON':'OFF',OPT.flash?'FULL':'REDUCED',['SMALL','MEDIUM','LARGE'][OPT.touchSize|0],'■'.repeat(OPT.music)+'□'.repeat(10-OPT.music),'■'.repeat(OPT.sfx)+'□'.repeat(10-OPT.sfx),OPT.voice?'ON':'OFF','■'.repeat(OPT.vvol)+'□'.repeat(10-OPT.vvol),!HEAD.usable()?'APP LINK ONLY':[HEAD.S.win&&'WINDOW',HEAD.S.look&&'LOOK',HEAD.S.steer&&'STEER'].filter(Boolean).join(' + ')||'OFF',''];
+      const val=[OPT.autoFire?'AUTO FIRE':'HOLD BUTTON',OPT.autoMissile?'AUTO FIRE':'BUTTON',OPT.invert?'INVERTED (UP = DIVE)':'NORMAL (UP = CLIMB)',OPT.pixel?'ON':'OFF',OPT.shake?'ON':'OFF',OPT.flash?'FULL':'REDUCED',['SMALL','MEDIUM','LARGE'][OPT.touchSize|0],'■'.repeat(OPT.music)+'□'.repeat(10-OPT.music),'■'.repeat(OPT.sfx)+'□'.repeat(10-OPT.sfx),OPT.voice?'ON':'OFF','■'.repeat(OPT.vvol)+'□'.repeat(10-OPT.vvol),OPT.handling==='classic'?'CLASSIC':'CLIMAX',!HEAD.usable()?'APP LINK ONLY':[HEAD.S.win&&'WINDOW',HEAD.S.look&&'LOOK',HEAD.S.steer&&'STEER'].filter(Boolean).join(' + ')||'OFF',''];
       const NO=menus.options.length, half=Math.ceil(NO/2), two=(TT&&Hh*0.062<44)||Hh*0.22+NO*Hh*0.062>Hh*0.92, orh=two?Math.max(TT?40:34,Math.min(46,(Hh*0.72)/half)):Math.max(TT?44:0,Hh*0.062), oy0=two?Hh*0.2:Hh*0.22;
       menus.options.forEach((m,i)=>{ let y=oy0+i*orh, x0=W*0.18, x1=W*0.82; if(two){ const c=i<half?0:1; y=oy0+(i%half)*orh; x0=c?W*0.51:W*0.03; x1=c?W*0.97:W*0.49; } const on=i===sel, xm=(x0+x1)/2;
         hit(x0,y-orh/2,x1-x0,orh,(X)=>{ sel=i; if(i===7||i===8||i===10) menuKey(X<xm?'left':'right'); else menuKey('ok'); }); if(on){ x.fillStyle='rgba(64,240,255,.18)'; x.fillRect(x0,y-orh/2+3,x1-x0,orh-6); } txt(m,x0+12*sc,y,two?15:17,on?'#fff':C.dim,'left',F.disp); txt(two&&i===2?(OPT.invert?'INVERTED':'NORMAL'):val[i],x1-12*sc,y,two?13:15,on?C.yel:'#fff','right'); });

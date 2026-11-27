@@ -66,7 +66,7 @@
   function setupTouch(){
     const ui=document.getElementById('touch'), st=document.getElementById('tstick'), kn=document.getElementById('tknob'), th=document.getElementById('tthr'), thk=document.getElementById('tthrk');
     const isTouch=('ontouchstart' in window)||navigator.maxTouchPoints>0;
-    const show=()=>{ if(!touch.on){ touch.on=true; ui.style.display='block'; } };
+    const show=()=>{ if(!touch.on){ touch.on=true; G.touchOn=true; ui.style.display='block'; } };
     if(isTouch&&Q.get('touch')!=='0') show(); if(Q.get('touch')==='1') show();
     addEventListener('touchstart',()=>{ show(); A.unlock(); },{passive:true,capture:true});
     const press=(b,id)=>{ touch.btn[b]=id; touch.latch[b]=true; const el=ui.querySelector('[data-b="'+b+'"]'); if(el) el.classList.add('on'); };

@@ -37,7 +37,12 @@
   };
   G.camMode='abc'; const CV=Object.assign({},CAM.abc), CVt=Object.assign({},CAM.abc); G.CV=CV;
   G.camSnap=function(m){ G.camMode=m||G.camMode; Object.assign(CV,CAM[G.camMode]); Object.assign(CVt,CAM[G.camMode]); };
-  G.opt = {autoFire:false, autoMissile:false, pixel:true, shake:true};
+  G.opt = {autoFire:false, autoMissile:false, pixel:true, shake:true, handling:/[?&]handling=classic/.test(location.search)?'classic':'climax'};
+  // HANDLING: CLIMAX (owner-approved 26 Nov, default) = closer to After Burner Climax: the horizon leans up to ~23 deg with a held turn, the
+  // camera swings round the jet, the jet is bigger and closer and noses up / down, and it carries momentum into a turn with a small overshoot.
+  // CLASSIC = the handling before this pass. OPTIONS > HANDLING, or ?handling=classic.
+  const HC=()=>G.opt.handling!=='classic'; G.HC=HC;
+  const HK=G.HK={w:5.0, z:0.62, ff:0.35, ffRate:18, bank:0.62, yaw:0.42, pitch:0.5, rollK:0.68, rollMax:24*Math.PI/180, rollRate:6.5, camYaw:0.105, camPit:0.085, swingX:3.2, swingY:2.2, backK:0.94, upK:1.1, relMaxTouch:3.2};
   // FABLE feel pass (25 Nov, owner-approved): closer + bigger targets, sweep locks, full-rack reward. ?fable=0 = the old values (compare).
   const NF = G.NF = !/[?&]fable=0/.test(location.search);
   // phones (short side <= 500 px): enemies drawn and hit 1.6x, elsewhere 1.25x - a drone is ~20 px wide when it dies instead of ~12
@@ -133,12 +138,17 @@
     const XM=G.laneX;
     { const ex=Math.abs(P.x)/XM; if(ex>0.6&&tx*P.x>0) tx*=Math.max(0,(1-ex)/0.4);
       const y0=G.env.yMin||K.yMin, y1=G.env.yMax||K.yMax, ym=(y0+y1)/2, eh=(y1-y0)/2, ey=Math.abs(P.y-ym)/eh; if(ey>0.6&&ty*(P.y-ym)>0) ty*=Math.max(0,(1-ey)/0.4); }
-    P.vx=lerp(P.vx,tx,1-Math.exp(-K.accel*dt)); P.vy=lerp(P.vy,ty,1-Math.exp(-K.accel*dt));
+    if(HC()&&G.ph!=='takeoff'){ // weight: a quick first bite (so it answers at once) + a sprung body that takes ~0.55 s to reach full speed and overshoots a little
+      if(P.sx==null){ P.sx=P.vx; P.sv=0; P.fx=P.vx; P.sy=P.vy; P.sw=0; P.fy=P.vy; }
+      const w=HK.w, z=HK.z, kf=1-Math.exp(-HK.ffRate*dt); P.fx=lerp(P.fx,tx,kf); P.fy=lerp(P.fy,ty,kf);
+      P.sv+=(w*w*(tx-P.sx)-2*z*w*P.sv)*dt; P.sx+=P.sv*dt; P.sw+=(w*w*(ty-P.sy)-2*(z+0.12)*w*P.sw)*dt; P.sy+=P.sw*dt;
+      P.vx=HK.ff*P.fx+(1-HK.ff)*P.sx; P.vy=HK.ff*P.fy+(1-HK.ff)*P.sy; }
+    else { P.vx=lerp(P.vx,tx,1-Math.exp(-K.accel*dt)); P.vy=lerp(P.vy,ty,1-Math.exp(-K.accel*dt)); P.sx=null; }
     if(P.rollT>0){ P.rollT-=dt; P.x+=P.rollDir*K.rollDash*dt/K.rollT*1.0; P.spin=P.rollDir*TAU*(1-P.rollT/K.rollT); if(P.rollT<=0) P.spin=0; }
-    P.x+=P.vx*dt; if(Math.abs(P.x)>XM){ const s=Math.sign(P.x); P.x=Math.abs(P.x)>XM+6?lerp(P.x,s*XM,1-Math.exp(-5*dt)):s*XM; if(P.vx*s>0) P.vx*=0.5; } /* a narrowing lane eases the jet in, no bump */
+    P.x+=P.vx*dt; if(Math.abs(P.x)>XM){ const s=Math.sign(P.x); P.x=Math.abs(P.x)>XM+6?lerp(P.x,s*XM,1-Math.exp(-5*dt)):s*XM; if(P.vx*s>0){ P.vx*=0.5; if(P.sx!=null){ P.sx*=0.5; P.sv*=0.5; P.fx*=0.5; } } } /* a narrowing lane eases the jet in, no bump */
     { const y0=G.env.yMin||K.yMin, y1=G.env.yMax||K.yMax; G.laneY1=G.laneY1==null?y1:lerp(G.laneY1,y1,1-Math.exp(-2*dt)); P.y+=P.vy*dt; if(P.y<y0) P.y=y0; if(P.y>G.laneY1) P.y=P.y>G.laneY1+5?lerp(P.y,G.laneY1,1-Math.exp(-4*dt)):G.laneY1; }
-    { const y0=G.env.yMin||K.yMin, y1=G.env.yMax||K.yMax; if((P.y<=y0&&P.vy<0)||(P.y>=y1&&P.vy>0)) P.vy*=0.5; }
-    P.bank=lerp(P.bank,-(P.vx/K.moveX*0.62+I.x*0.38)*K.bankMax,1-Math.exp(-7*dt)); P.pitch=lerp(P.pitch,P.vy/K.moveY*0.28,1-Math.exp(-6*dt));
+    { const y0=G.env.yMin||K.yMin, y1=G.env.yMax||K.yMax; if((P.y<=y0&&P.vy<0)||(P.y>=y1&&P.vy>0)){ P.vy*=0.5; if(P.sx!=null){ P.sy*=0.5; P.sw*=0.5; P.fy*=0.5; } } }
+    P.bank=lerp(P.bank,-clamp(P.vx/K.moveX*0.62+I.x*0.38,-1,1)*(HC()?HK.bank:K.bankMax),1-Math.exp(-7*dt)); P.pitch=lerp(P.pitch,clamp(P.vy/K.moveY,-1.1,1.1)*(HC()?HK.pitch:0.28),1-Math.exp(-6*dt));
     // throttle lever: stays where you leave it (W/S, pad RT/LT or right stick, touch slider); slam = straight to full (or to the stop)
     const ctl=G.ph!=='dead';
     if(ctl){ if(I.thrAbs!=null) P.thr=lerp(K.thrMin,K.thrMax,clamp(I.thrAbs,0,1));
@@ -159,7 +169,7 @@
     if(P.climaxT<=0 && P.climax<1) P.climax=Math.min(1,P.climax+dt*0.008*(G.ex&&G.ex.gauge?2:1));
     if(G.ex&&G.ex.inf&&P.climaxT<=0) P.climax=1;
     // model
-    const o=G.player; o.position.set(P.x,P.y,0); o.rotation.set(P.pitch,-P.vx/K.moveX*0.22,P.bank+P.spin,'YXZ');
+    const o=G.player; o.position.set(P.x,P.y,0); o.rotation.set(P.pitch,-clamp(P.vx/K.moveX,-1.1,1.1)*(HC()?HK.yaw:0.22),P.bank+P.spin,'YXZ');
     const bst=0.6+0.8*(P.speed-0.66); for(const b of G.burn){ const s=(4+Math.random()*1.4)*bst; b.scale.set(s/5,s/5,1); b.quaternion.copy(cam.quaternion); }
     for(const g of G.plume){ const L=(9+bst*9)*(0.9+Math.random()*0.2)*(P.speed>1.1?1.5:1); g.scale.set(0.9+bst*0.4,0.9+bst*0.4,L); }
     G.player.visible = !(P.inv>0 && P.hurtT<=0 && (G.t*20|0)%2 && !P.dead) ;
@@ -612,13 +622,19 @@
       const XM=G.laneX||G.env.xMax||K.xMax, y0=G.env.yMin||K.yMin, y1=G.env.yMax||K.yMax, ym=(y0+y1)/2, eh=(y1-y0)/2;
       const tx0=P.x-CV.offX*clamp(P.x/XM,-1,1), ty=P.y-CV.offY*clamp((P.y-ym)/eh,0,1); const tb=G.touchLand?5:0; /* phones: the jet's roam is shifted left, clear of the button cluster */
       const tx=tx0+tb; C.x=lerp(C.x,tx,1-Math.exp(-CV.lagX*dt)); C.y=lerp(C.y,ty,1-Math.exp(-CV.lagY*dt));
-      let cx=C.x+sx, cy=C.y+CV.up+sy, cz=G.camZ||CV.back; const ly=cy-Math.tan(CV.pitch+(cam.aspect>1.9?0.022:0))*(cz+210); // wide phones: jet a touch higher, clear of the bottom HUD
+      const hc=HC()&&!G.toCam, hk=hc?1:0; // CLIMAX handling: closer camera (bigger jet), swings out against the turn and down in a climb (you see the jet's side / belly)
+      G.swX=lerp(G.swX||0,hc?clamp((P.vx||0)/K.moveX,-1,1):0,1-Math.exp(-4.5*dt)); G.swY=lerp(G.swY||0,hc?clamp((P.vy||0)/K.moveY,-1,1):0,1-Math.exp(-4.5*dt));
+      const port=cam.aspect<1, pk=port?0:1; /* portrait: the jet already spans half the width - no swing, no closer camera, just the lean and the weight */
+      let cx=C.x+sx-G.swX*HK.swingX*(G.touchLand?0.6:1)*pk, cy=C.y+CV.up*(hc&&!port?HK.upK:1)+sy-(G.swY>0?G.swY*HK.swingY:G.swY*0.7)*pk-Math.abs(G.swX)*(hc?2.8:0)*pk, /* in a banked turn the camera sinks a little: the tall, leaning jet stays inside the frame */ cz=G.camZ||CV.back*(hc&&!port?HK.backK:1); if(hc&&!port){ const r1=G.touchLand?HK.relMaxTouch:9, r0=G.touchLand?-7:-9; /* with the horizon leaning, a jet far off-centre swings toward a corner: the camera stays closer to it */ if(P.x-cx>r1) cx=P.x-r1; else if(P.x-cx<r0) cx=P.x-r0; } /* phones: the camera goes with the jet on the right, so a wing never slides under GUN / CLIMAX */ const ly=cy-Math.tan(CV.pitch+(cam.aspect>1.9?0.022:0))*(cz+210); // wide phones: jet a touch higher, clear of the bottom HUD
       // launch shot: high rear three-quarter view of the squadron on the deck, swinging down in behind the jet as the catapult fires
       if(G.toCam){ const k=G.toCam.k; cx=lerp(P.x+17,cx,k); cy=lerp(P.y+9.5,cy,k); cz=lerp(34,cz,k); }
       cam.position.set(cx,cy,cz);
       if(G.toCam&&G.toCam.k<1){ const k=G.toCam.k; cam.lookAt(lerp(P.x-5,C.x,k),lerp(P.y+1.5,ly,k),lerp(-60,-210,k)); }
+      else if(hc){ cam.lookAt(C.x,ly,-210); cam.rotateY(-G.swX*HK.camYaw); cam.rotateX(G.swY*HK.camPit); } /* the world turns with you, not just slides */
       else { cam.lookAt(C.x,ly,-210); cam.rotateY(-(P.vx||0)/K.moveX*0.05); cam.rotateX((P.vy||0)/K.moveY*0.04); }
-      G.camRollNow=lerp(G.camRollNow||0,clamp(-(P.bank||0)*CV.rollK,-K.camRollMax,K.camRollMax),1-Math.exp(-4*dt));
+      // (measured from the After Burner Climax frames: the horizon leans the same way as the wings on screen, so the jet itself banks LESS here - 35 deg - and the world does the rest: about 60 deg of lean on screen)
+      { const rk=hc?CV.rollK/0.15*HK.rollK:CV.rollK, rm=hc?HK.rollMax:K.camRollMax; // the horizon leans with the bank (never with the barrel roll: that spins the jet only)
+        G.camRollNow=lerp(G.camRollNow||0,clamp(-(P.bank||0)*rk,-rm,rm),1-Math.exp(-(hc?HK.rollRate:4)*dt)); }
       cam.rotateZ(G.camRollNow);
     }
     let f=(G.P&&G.P.climaxT>0)?68:(G.P?62+(G.P.speed-1)*12+(G.slamT>0?3:0):62); if(!title) f+=CV.fov; if(cam.aspect>2&&!title) f*=0.92; // short wide phones: a little tighter so the jet and targets read

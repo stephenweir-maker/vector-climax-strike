@@ -22,6 +22,10 @@
   };
   G.DIFF = { cadet:{fire:0.6,dmg:0.6,count:0.8,tele:1.3,win:1.3}, pilot:{fire:1,dmg:1,count:1,tele:1,win:1}, ace:{fire:1.35,dmg:1.3,count:1.2,tele:0.85,win:0.85} };
   G.opt = {shake:1, flash:1, invert:false, assist:true, rumble:1};
+  // HANDLING: CLIMAX / CLASSIC (as stages 1-4; OPTIONS on the title page writes vcx_opt.handling, ?handling=classic overrides)
+  G.handling=(()=>{ const m=/[?&]handling=(classic|climax)/.exec(location.search); if(m) return m[1]; try{ const o=JSON.parse(localStorage.getItem('vcx_opt')||'{}'); if(o&&o.handling==='classic') return 'classic'; }catch(e){} return 'climax'; })();
+  const HC=()=>G.handling!=='classic'; G.HC=HC;
+  const HK=G.HK={w:5.0, z:0.62, ff:0.35, ffRate:18, bank:0.62, yaw:0.4, pitch:0.45, rollK:0.68, rollMax:24*Math.PI/180, rollTau:0.15, swingX:1.6, sink:3.2, swingY:0.8, backK:0.88, look:0.16, tbT:5.5, r1T:2.5, r0T:-6, rK:7, dy0:-2, dy1:0.5, lkK:1, swD:2};
   /* ---------------- state ---------------- */
   const ENS=[], BOLTS=[], EB=[], HZ=[], ALLY=[], POPS=[];
   G.ENS=ENS; G.BOLTS=BOLTS; G.EB=EB; G.HZ=HZ; G.ALLY=ALLY; G.POPS=POPS;
@@ -159,7 +163,12 @@
     if(G.centerPull&&ctl){ tx+=-P.x*G.centerPull; ty+=-P.y*G.centerPull; }
     if(!L.wall){ const e=Math.abs(P.x)/L.hx; if(e>K.edge&&tx*P.x>0) tx*=Math.max(0,(1-e)/(1-K.edge)); }
     { const e=Math.abs(P.y-ym)/yh; if(e>K.edge&&ty*(P.y-ym)>0) ty*=Math.max(0,(1-e)/(1-K.edge)); }
-    P.vx=lerp(P.vx,tx,1-Math.exp(-K.accel*dt)); P.vy=lerp(P.vy,ty,1-Math.exp(-K.accel*dt));
+    if(HC()){ // weight: a quick first bite + a sprung body (~0.55 s to full speed, ~5 % overshoot); anything that shoves the jet (walls, obstacles) resets the spring
+      if(P.sx==null||Math.abs(P.vx-P._vxo)>1e-6||Math.abs(P.vy-P._vyo)>1e-6){ P.sx=P.fx=P.vx; P.sv=0; P.sy=P.fy=P.vy; P.sw=0; }
+      const w=HK.w, z=HK.z, kf=1-Math.exp(-HK.ffRate*dt); P.fx=lerp(P.fx,tx,kf); P.fy=lerp(P.fy,ty,kf);
+      P.sv+=(w*w*(tx-P.sx)-2*z*w*P.sv)*dt; P.sx+=P.sv*dt; P.sw+=(w*w*(ty-P.sy)-2*(z+0.12)*w*P.sw)*dt; P.sy+=P.sw*dt;
+      P.vx=HK.ff*P.fx+(1-HK.ff)*P.sx; P.vy=HK.ff*P.fy+(1-HK.ff)*P.sy; P._vxo=P.vx; P._vyo=P.vy; }
+    else { P.vx=lerp(P.vx,tx,1-Math.exp(-K.accel*dt)); P.vy=lerp(P.vy,ty,1-Math.exp(-K.accel*dt)); P.sx=null; }
     P.x+=P.vx*dt; P.y+=P.vy*dt;
     // lane limits move between sections: ease the jet back in instead of snapping
     const hx=L.hx; if(Math.abs(P.x)>hx){ const over=Math.abs(P.x)-hx;
@@ -168,8 +177,8 @@
     if(P.y<L.y0){ const over=L.y0-P.y; if(L.wall&&P.vy<-14&&P.wallT<=0) wallHit(0); P.y=L.y0-over*Math.exp(-dt*(L.wall?40:6)); if(P.vy<0) P.vy*=L.wall?-0.45:0.5; }
     if(P.y>L.y1){ const over=P.y-L.y1; P.y=L.y1+over*Math.exp(-dt*6); if(P.vy>0) P.vy*=0.5; }
     if(P.wallT>0) P.wallT-=dt;
-    P.bank=lerp(P.bank,-(P.vx/K.moveX*0.66+ix*0.34)*K.bankMax*(L.wall?0.75:1),1-Math.exp(-6.5*dt));
-    P.pitch=lerp(P.pitch,P.vy/K.moveY*0.26,1-Math.exp(-6*dt));
+    P.bank=lerp(P.bank,-clamp(P.vx/K.moveX*0.66+ix*0.34,-1,1)*(HC()?HK.bank:K.bankMax)*(L.wall?0.75:1),1-Math.exp(-6.5*dt));
+    P.pitch=lerp(P.pitch,clamp(P.vy/K.moveY,-1.1,1.1)*(HC()?HK.pitch:0.26),1-Math.exp(-6*dt));
     // world position, velocity
     const f=R.frame(P.s,_f); _a.copy(PW);
     PW.copy(f.p).addScaledVector(f.r,P.x).addScaledVector(f.u,P.y);
@@ -179,7 +188,7 @@
       if(P.x+K.jetHW>o.x0&&P.x-K.jetHW<o.x1&&P.y+K.jetHH>o.y0&&P.y-K.jetHH<o.y1){ o.hit=true; const up=P.y>(o.y0+o.y1)/2; P.vy=(up?1:-1)*45; P.y+=(up?1:-1)*1.5;
         G.logHit&&G.logHit({src:'obstacle',tele:9,vis:true,dmg:K.obsDmg}); G.hurt(K.obsDmg,'obstacle',PW.clone().addScaledVector(f.f,6)); spark(PW,COL.amber,14,1); VS.A&&VS.A.sfx.clang(); } }
     // model
-    const o=G.player; o.position.copy(PW); G.orient(o,P.s,-P.vx/K.moveX*0.2,P.pitch,-P.bank);
+    const o=G.player; o.position.copy(PW); G.orient(o,P.s,-clamp(P.vx/K.moveX,-1.1,1.1)*(HC()?HK.yaw:0.2),P.pitch,-P.bank);
     const bst=0.55+0.85*(P.thrE-K.thrMin)/(K.thrMax-K.thrMin);
     for(const b of G.burn){ const sc=(4+Math.random()*1.4)*bst; b.scale.set(sc/5,sc/5,1); b.quaternion.copy(G.cam.quaternion).premultiply(_q.copy(o.quaternion).invert()); }
     for(const g of G.plume){ const Lp=(8+bst*12)*(0.9+Math.random()*0.2)*(G.slamT>0?1.6:1); g.scale.set(0.9+bst*0.4,0.9+bst*0.4,Lp); }
@@ -296,7 +305,7 @@
     if(G.trauma>0){ G.trauma=Math.max(0,G.trauma-dt*1.4); const k=G.trauma*G.trauma*G.opt.shake, t=G.t*31; sx=Math.sin(t*1.7)*k*0.9; sy=Math.sin(t*2.3+1)*k*0.7; sr=Math.sin(t*1.1+2)*k*0.02; }
     // phones in landscape: the camera follows the jet more tightly and the jet sits a little left of centre, so it never
     // roams under the right-hand FIRE / STRIKE cluster even at the lane edge (V1 review fix 5)
-    const tl=G.dev==='touch'&&E.W>E.H, tb=tl?5.5:0, fx=tl?0.95:K.camFollowX;
+    const tl=(G.dev==='touch'||(HC()&&G.touchOn))&&E.W>E.H, tb=tl?(HC()?HK.tbT:5.5):0, /* CLIMAX: the phone framing holds while the touch buttons are on screen (as stages 1-4), whatever steers */ fx=tl?0.95:K.camFollowX;
     const tx=P.x*fx+tb, ty=P.y*K.camFollowY;
     if(!G.camInit){ CS.x=tx; CS.y=ty; G.camInit=true; }
     CS.x=lerp(CS.x,tx,ex(dt,tl?K.camLag*0.6:K.camLag)); CS.y=lerp(CS.y,ty,ex(dt,K.camLag*1.3));
@@ -306,12 +315,18 @@
     // TORPEDO LOCK tightens the view (narrower FOV, zoomK eased in G.update); the swoop over the ruined spire rises up and over the jet
     const zk=G.zoomK||0; let swU=0, swF=0, swL=0, swE=0; if(G.swoop){ const k=Math.min(1,G.swoop.t/G.swoop.dur), e=Math.sin(k*Math.PI); swE=e*e*(3-2*e); swU=swE*50; swF=-swE*20; swL=swE*30; }
     const f=R.frame(P.s,_f);
-    _cp.copy(f.p).addScaledVector(f.r,CS.x+sx+ox).addScaledVector(f.u,CS.y+K.camUp+sy+oy+swU).addScaledVector(f.f,-K.camBack-ob+swF);
+    const hc=HC()&&!(S&&S.on)&&!G.swoop&&cam.aspect>=1, lk=(VS.MS&&VS.MS.lk)||zk>0.05; // CLIMAX handling: closer camera, swings out against the turn, sinks a little in a banked turn / climb
+    CS.swX=lerp(CS.swX||0,hc?clamp(P.vx/K.moveX,-1,1):0,ex(dt,0.22)); CS.swY=lerp(CS.swY||0,hc?clamp(P.vy/K.moveY,-1,1):0,ex(dt,0.22)); CS.bk=lerp(CS.bk==null?1:CS.bk,hc&&!lk?HK.backK:1,ex(dt,0.5));
+    let cxo=CS.x+sx+ox-(tl?Math.min(0,CS.swX)*0.6:CS.swX)*HK.swingX, dX=0, dY=0;
+    CS.ck=lerp(CS.ck==null?1:CS.ck,hc?1:0,ex(dt,0.25)); /* eased, so the VECTOR STRIKE flourish / spire swoop take the camera away and give it back without a cut */
+    if(HC()&&cam.aspect>=1&&CS.ck>0.001){ const r1=tl?HK.r1T:HK.rK, r0=tl?HK.r0T:-HK.rK; if(P.x-cxo>r1) dX=P.x-r1-cxo; else if(P.x-cxo<r0) dX=P.x-r0-cxo; dX*=CS.ck; cxo+=dX; /* as stages 1-4: with the horizon leaning, a jet far off-centre swings toward a corner - the camera stays close enough that it never leaves the frame or slides under the buttons */
+      const ry=P.y-CS.y; if(ry>HK.dy1) dY=ry-HK.dy1; else if(ry<HK.dy0) dY=ry-HK.dy0; dY*=CS.ck; } /* and in height: a jet at the top of a trench no longer climbs into the sight, a dive no longer drops it out of the bottom */
+    _cp.copy(f.p).addScaledVector(f.r,cxo).addScaledVector(f.u,dY+CS.y+K.camUp*(1-(1-CS.bk)*1.3)+sy+oy+swU-Math.abs(CS.swX)*HK.sink-(CS.swY>0?CS.swY*HK.swingY:CS.swY*HK.swD)).addScaledVector(f.f,(-K.camBack-ob)*CS.bk+swF);
     const fa=R.frame(P.s+K.lookAhead,_f2);
-    _cl.copy(fa.p).addScaledVector(fa.r,CS.x*0.8+P.vx*0.08).addScaledVector(fa.u,CS.y*0.8+K.lookUp+P.vy*0.06-swL);
+    _cl.copy(fa.p).addScaledVector(fa.r,dX*HK.lkK+CS.x*0.8+P.vx*(hc?(tl&&P.vx<0?0.03:HK.look):0.08)).addScaledVector(fa.u,dY*HK.lkK+CS.y*0.8+K.lookUp+P.vy*(hc?0.1:0.06)-swL); /* the view turns into the turn: the world swings, not just slides */
     if(swE>0) _cl.lerp(PW,swE*0.55); // the swoop keeps WARRANT-7 in frame while the camera rises up and over it
     cam.position.copy(_cp); cam.up.copy(f.u); cam.lookAt(_cl);
-    CS.roll=lerp(CS.roll,clamp(-P.bank*K.camRollK,-K.camRollMax,K.camRollMax),ex(dt,0.3));
+    CS.roll=hc||(HC()&&cam.aspect<1)?lerp(CS.roll,clamp(-P.bank*HK.rollK,-HK.rollMax,HK.rollMax),ex(dt,HK.rollTau)):lerp(CS.roll,clamp(-P.bank*K.camRollK,-K.camRollMax,K.camRollMax),ex(dt,0.3)); /* horizon leans up to ~24 deg with the bank */
     cam.rotateZ(CS.roll+sr);
     let fv=(K.fov+(P.thrE-1)/(K.thrMax-1)*K.fovThr+(G.slamT>0?3:0)+(S&&S.on?5:0))*(1-0.2*zk); if(cam.aspect>2) fv*=0.94;
     if(cam.aspect<1.25){ const hf=2*Math.atan(Math.tan(fv*Math.PI/360)*1.6); fv=Math.min(100,2*Math.atan(Math.tan(hf/2)/cam.aspect)*180/Math.PI); }
